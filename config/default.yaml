@@ -1,0 +1,177 @@
+# Default configuration for gaitscreen.
+#
+# Every threshold in the system lives here -- nothing clinical is hardcoded in
+# the modules. Values marked ILLUSTRATIVE are placeholders drawn from general
+# geriatric-gait literature and MUST be reviewed against current clinical
+# sources before any real deployment. This is a screening/trend tool, not a
+# diagnostic instrument.
+
+pose:
+  # The ~30 MB model bundle is not committed to the repository; it is fetched on
+  # first use and cached at model_path. Set auto_download false in air-gapped
+  # deployments and place the file there yourself.
+  #
+  # Variants, if memory is tight (Streamlit Community Cloud allows ~1 GB): swap
+  # `heavy` for `full` or `lite` in BOTH settings below. Lighter models trade
+  # landmark accuracy for footprint, and foot landmark precision is what event
+  # detection depends on -- prefer heavy unless the app is actually being killed.
+  model_path: models/pose_landmarker_heavy.task
+  model_url: https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/latest/pose_landmarker_heavy.task
+  auto_download: true
+  num_poses: 1
+  min_detection_confidence: 0.5
+  min_tracking_confidence: 0.5
+  min_presence_confidence: 0.5
+
+video:
+  # Warn below this: general landmark/event-timing quality.
+  fps_warn_below: 30
+  # Stride-time variability needs finer temporal resolution than 30 fps can
+  # give (see docs/limitations.md). Below this, CV is still computed but is
+  # marked low-confidence.
+  fps_variability_min: 50
+  min_frame_height: 360
+  max_frames: 0 # 0 = no limit
+
+landmarks:
+  # MediaPipe `visibility` is not a calibrated probability; treat as a soft
+  # score. Samples below this are marked invalid and interpolated over.
+  visibility_threshold: 0.5
+  # Gaps longer than this are NOT interpolated; the series is split into
+  # separate analysis segments instead.
+  max_interpolation_gap_frames: 6
+
+filter:
+  # butterworth = zero-phase (filtfilt), the right default for offline video:
+  # no phase lag, so event timing is preserved.
+  # one_euro / kalman are causal and provided for a future real-time path.
+  kind: butterworth
+  butterworth:
+    cutoff_hz: 6.0
+    order: 4
+  one_euro:
+    min_cutoff_hz: 1.0
+    beta: 0.02
+    d_cutoff_hz: 1.0
+  kalman:
+    process_var: 1.0e-3
+    measurement_var: 1.0e-2
+
+segmentation:
+  # zeni = coordinate-based (Zeni et al. 2008): heel-strike at max anterior
+  # heel position relative to pelvis, toe-off at min anterior toe position.
+  # ankle_velocity = fallback/cross-check heuristic.
+  method: zeni
+  fallback_method: ankle_velocity
+  subframe_refine: true
+  min_stride_time_s: 0.6
+  max_stride_time_s: 2.5
+  peak_prominence_frac: 0.15 # of signal range
+  # Acceleration/deceleration strides inflate variability -- drop them.
+  exclude_strides_at_pass_edges: 1
+  # A direction reversal (turn) ends a pass.
+  turn_min_still_frames: 5
+
+speed:
+  # Gait speed is only reported when the subject genuinely translates across
+  # a static frame. Treadmill / walking-in-place / camera-tracked footage
+  # cannot yield speed and must be refused, not estimated.
+  min_subject_translation_frac: 0.25 # of frame width
+  max_camera_motion_frac: 0.03 # of frame width, cumulative
+  camera_motion_sample_every: 5 # frames
+  # Use only the middle portion of a pass (steady state).
+  steady_state_trim_frac: 0.15
+
+features:
+  # Stride-time CV is unstable below this many strides; reported as null +
+  # low-confidence rather than as a misleadingly precise number.
+  min_strides_for_cv: 10
+  min_cycles_for_session: 4
+  angle_curve_points: 101 # 0-100% of cycle, 1% steps
+  # No frontal camera in this setup, so lateral trunk sway is unavailable.
+  # Sagittal anterior-posterior trunk lean is used as the substitute.
+  trunk_sway_axis: sagittal_ap
+
+quality:
+  # Session data-quality score in [0, 1]; below threshold -> low-confidence,
+  # excluded from trend baselines but still stored and reported.
+  low_confidence_below: 0.6
+  weights:
+    landmark_visibility: 0.35
+    valid_cycle_count: 0.30
+    frame_rate: 0.15
+    detection_rate: 0.10
+    assistive_device: 0.10
+  target_cycle_count: 10
+  # MediaPipe cannot see a cane or walker -- it detects bodies, not objects.
+  # `assistive_device` in session metadata is the authoritative signal; this
+  # arm-swing heuristic is advisory only and may only LOWER confidence.
+  assistive_device_heuristic:
+    enabled: true
+    # Reciprocal arm swing is suppressed and asymmetric when a cane is used.
+    max_wrist_swing_frac_of_leg_length: 0.08
+    min_arm_swing_asymmetry_ratio: 2.0
+
+flagging:
+  # --- Absolute thresholds (ILLUSTRATIVE -- review before deployment) ---
+  absolute:
+    gait_speed_mps:
+      high_risk_below: 0.6
+      moderate_risk_below: 1.0
+    stride_time_cv_pct:
+      high_risk_above: 5.0
+      moderate_risk_above: 3.0
+    step_length_asymmetry_pct:
+      high_risk_above: 15.0
+      moderate_risk_above: 8.0
+    double_support_pct:
+      high_risk_above: 30.0
+      moderate_risk_above: 26.0
+
+  # --- Personal trend check ---
+  baseline:
+    # SD from 3-5 sessions is very unstable, so a robust centre/spread is used
+    # (median + 1.4826 * MAD) and a minimum session count is enforced.
+    min_sessions: 5
+    robust: true
+    # Baseline window: whichever of these yields more sessions. Days alone
+    # breaks down at monthly screening cadence (90 days = 3 sessions).
+    window_days: 90
+    window_min_sessions: 5
+    exclude_low_confidence: true
+  trend:
+    deviation_sds: 1.5
+    # Never flag noise: the deviation must also exceed the tool's own
+    # test-retest error for that metric. ILLUSTRATIVE -- set from a real
+    # repeatability study on your capture setup.
+    minimum_detectable_change:
+      gait_speed_mps: 0.05
+      stride_time_cv_pct: 1.0
+      step_length_asymmetry_pct: 3.0
+      cadence_spm: 4.0
+      double_support_pct: 2.0
+      trunk_ap_sway_norm: 0.01
+    # Only deterioration is a flag; improvement is not.
+    direction_aware: true
+    # Bias toward sensitivity: a single deviating session flags. A deviation
+    # seen in 2 of the last 3 sessions escalates to `confirmed`.
+    confirm_window: 3
+    confirm_min_hits: 2
+
+storage:
+  db_path: data/gaitscreen.db
+  artifacts_root: data/sessions
+  # Raw landmarks are always kept: a longitudinal tool must be able to
+  # re-derive old sessions when the algorithm changes, otherwise an upgrade
+  # creates a fake trend break indistinguishable from real decline.
+  keep_raw_landmarks: true
+
+reporting:
+  output_root: data/reports
+  metrics_to_plot:
+    - gait_speed_mps
+    - stride_time_cv_pct
+    - step_length_asymmetry_pct
+    - cadence_spm
+    - double_support_pct
+    - trunk_ap_sway_norm

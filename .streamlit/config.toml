@@ -1,0 +1,14 @@
+# Committed deliberately: these settings need to apply to the deployment, not
+# just to whoever ran the app last. Secrets go in .streamlit/secrets.toml, which
+# is gitignored and set through the Streamlit Cloud Secrets panel instead.
+
+[server]
+# Default is 200 MB. A 60 fps side-on walk of 15-20 seconds is comfortably
+# under that, but multi-pass recordings from a phone can exceed it.
+maxUploadSize = 400
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+base = "light"

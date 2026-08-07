@@ -1,0 +1,30 @@
+# Runtime dependencies for gaitscreen, including the Streamlit pilot platform.
+#
+#   python -m pip install -r requirements.txt
+#   python -m pip install -e .          # then install the package itself
+#
+# Lower bounds rather than exact pins: this is a pilot that has to install on
+# whatever machines the testers have. The versions this build was developed and
+# verified against are noted alongside each entry — if you hit a behavioural
+# difference, pin to those before looking anywhere else.
+
+# --- pose estimation ---------------------------------------------------------
+# 0.10.3x removed the legacy `mediapipe.solutions` API entirely, so the Tasks
+# PoseLandmarker is the only option and a .task model bundle must be downloaded
+# separately (see README). Do not relax this lower bound.
+mediapipe>=0.10.30            # verified: 0.10.35
+
+# --- video and numerics ------------------------------------------------------
+opencv-python>=4.9            # verified: 5.0.0.93
+numpy>=1.26                   # verified: 2.4.6
+scipy>=1.11                   # verified: 1.17.1  (signal.filtfilt, find_peaks)
+pandas>=2.1                   # verified: 3.0.3
+pyarrow>=15                   # verified: 24.0.0  (Parquet landmark archives)
+
+# --- output ------------------------------------------------------------------
+matplotlib>=3.8               # verified: 3.11.1
+jinja2>=3.1                   # verified: 3.1.6
+pyyaml>=6.0                   # verified: 6.0.3
+
+# --- pilot platform ----------------------------------------------------------
+streamlit>=1.30               # verified: 1.61.1

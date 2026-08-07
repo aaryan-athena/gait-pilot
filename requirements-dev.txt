@@ -1,0 +1,8 @@
+# Development dependencies. Installs the runtime set as well.
+#
+#   python -m pip install -r requirements-dev.txt
+#   python -m pip install -e .
+
+-r requirements.txt
+
+pytest>=8.0                   # verified: 9.1.1

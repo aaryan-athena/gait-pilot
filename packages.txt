@@ -1,0 +1,12 @@
+# Debian packages installed by Streamlit Community Cloud before pip runs.
+#
+# Required, not optional. `mediapipe` depends on `opencv-contrib-python`, which
+# links against these shared libraries and is not present in the deployment
+# image. Without them the app fails at import with
+#   ImportError: libGL.so.1: cannot open shared object file
+# which is the single most common Streamlit Cloud failure for OpenCV projects.
+#
+# Pinning to the headless OpenCV build in requirements.txt does not avoid this:
+# pip installs the full build anyway to satisfy mediapipe's own dependency.
+libgl1
+libglib2.0-0

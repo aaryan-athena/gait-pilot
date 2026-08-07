@@ -1,0 +1,52 @@
+# What stays in the repository is what a Streamlit deployment needs to run:
+#   app/  src/  config/  docs/  models/.gitkeep  sample_video/
+#   requirements.txt  packages.txt  pyproject.toml  .streamlit/config.toml
+# Everything below is either generated, machine-specific, or a secret.
+
+# --- Python build artefacts --------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# --- Local environments ------------------------------------------------------
+.venv/
+venv/
+env/
+.python-version
+
+# --- Test and tooling caches -------------------------------------------------
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# --- Runtime data ------------------------------------------------------------
+# Session database, uploaded videos, per-session artifacts and reports. All of
+# it is regenerated from source videos, and on Streamlit Community Cloud the
+# filesystem is ephemeral anyway, so committing it would be misleading as well
+# as wasteful.
+data/
+sample_video/*.mp4
+
+# --- Pose model --------------------------------------------------------------
+# ~30 MB binary. Not committed: the app downloads it on first use and caches it
+# here, which works identically on a laptop and on Streamlit Cloud. See
+# `pose.auto_download` in config/default.yaml.
+models/*.task
+
+# --- Secrets -----------------------------------------------------------------
+# Never commit. On Streamlit Cloud these are set in the app's Secrets panel.
+.streamlit/secrets.toml
+.env
+*.pem
+
+# --- Editor and OS -----------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

@@ -1,0 +1,2 @@
+# Keeps this directory in git. The pose model itself is downloaded on first
+# use and gitignored -- see pose.auto_download in config/default.yaml.
