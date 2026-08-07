@@ -41,14 +41,29 @@ in the repo exist for that deployment and are needed there:
 | file | why |
 | --- | --- |
 | `requirements.txt` | Python dependencies |
-| `packages.txt` | `libgl1`, `libglib2.0-0` — **required**, see below |
+| `packages.txt` | `libgl1` — **required**, see below |
 | `.streamlit/config.toml` | 400 MB upload limit for video files |
 
 `packages.txt` is not optional. `mediapipe` depends on `opencv-contrib-python`,
-which links against system libraries absent from the deployment image, and
-without them the app dies at import with `ImportError: libGL.so.1`. Switching to
-headless OpenCV in `requirements.txt` does not help, because pip installs the
-full build anyway to satisfy mediapipe.
+which links against `libGL.so.1`, and that is absent from the deployment image —
+without it the app dies at import with `ImportError: libGL.so.1: cannot open
+shared object file`. Switching to headless OpenCV in `requirements.txt` does not
+help, because pip installs the full build anyway to satisfy mediapipe.
+
+Two traps in that one file, both of which produce a failed build rather than a
+clear message:
+
+- **It takes bare package names only — no comments, no blank-line padding.**
+  Every line is passed to `apt-get install`, so a `#` explanation becomes a list
+  of nonexistent packages (`E: Unable to locate package Required,` and so on),
+  and an apostrophe in a comment breaks `xargs` before apt even runs. Keep the
+  explanations here in the README instead.
+- **Package names differ by base image.** The current image is Debian trixie,
+  where `libgl1` is correct. Do not add `libgl1-mesa-glx` (removed after Debian
+  11) or `libglib2.0-0` (renamed to `libglib2.0-0t64` in trixie) — an
+  unresolvable name aborts the whole apt step and takes the working entries down
+  with it. glib is already present in the image; if a future image drops it, add
+  `libglib2.0-0t64` rather than the old name.
 
 Two things to know about the hosted environment:
 
@@ -201,7 +216,8 @@ src/gaitscreen/            the analysis library — no UI code
 config/default.yaml        every threshold; nothing clinical is hardcoded
 docs/limitations.md        what to distrust and why — the app renders this directly
 docs/original-brief.md     the specification this was built from
-sample_video/              four 25 fps test clips, so a tester can try it at once
+sample_video/              four 25 fps test clips (the .mp4s are gitignored, so
+                           they are local-only and not part of a deployment)
 tests/                     137 tests; fixtures/synthetic.py generates known gait
 
 requirements.txt           runtime dependencies (requirements-dev.txt adds pytest)
