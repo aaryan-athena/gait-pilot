@@ -41,29 +41,31 @@ in the repo exist for that deployment and are needed there:
 | file | why |
 | --- | --- |
 | `requirements.txt` | Python dependencies |
-| `packages.txt` | `libgl1` — **required**, see below |
+| `packages.txt` | `libgl1`, `libglib2.0-0t64` — **required**, see below |
 | `.streamlit/config.toml` | 400 MB upload limit for video files |
 
 `packages.txt` is not optional. `mediapipe` depends on `opencv-contrib-python`,
-which links against `libGL.so.1`, and that is absent from the deployment image —
-without it the app dies at import with `ImportError: libGL.so.1: cannot open
-shared object file`. Switching to headless OpenCV in `requirements.txt` does not
-help, because pip installs the full build anyway to satisfy mediapipe.
+which links against `libGL.so.1` and `libgthread-2.0.so.0`; neither is in the
+deployment image, and without them the app dies at import. Switching to headless
+OpenCV in `requirements.txt` does not help, because pip installs the full build
+anyway to satisfy mediapipe.
 
-Two traps in that one file, both of which produce a failed build rather than a
-clear message:
+Three traps in that one small file, each of which produces a failed build rather
+than a useful message:
 
-- **It takes bare package names only — no comments, no blank-line padding.**
-  Every line is passed to `apt-get install`, so a `#` explanation becomes a list
-  of nonexistent packages (`E: Unable to locate package Required,` and so on),
-  and an apostrophe in a comment breaks `xargs` before apt even runs. Keep the
-  explanations here in the README instead.
-- **Package names differ by base image.** The current image is Debian trixie,
-  where `libgl1` is correct. Do not add `libgl1-mesa-glx` (removed after Debian
-  11) or `libglib2.0-0` (renamed to `libglib2.0-0t64` in trixie) — an
-  unresolvable name aborts the whole apt step and takes the working entries down
-  with it. glib is already present in the image; if a future image drops it, add
-  `libglib2.0-0t64` rather than the old name.
+- **Bare package names only — no comments, no padding.** Every line goes
+  straight to `apt-get install`, so a `#` explanation becomes a list of
+  nonexistent packages (`E: Unable to locate package Required,` …), and an
+  apostrophe anywhere in it breaks `xargs` before apt even runs.
+- **One bad name takes down the whole step.** apt installs nothing if any entry
+  is unresolvable, so a wrong guess also loses the entries that were correct.
+  Verify names against `https://packages.debian.org/<suite>/<package>` before
+  adding them — a real package has a "Details of package" page, a virtual one
+  does not.
+- **Names are specific to the base image**, currently Debian trixie. Both
+  libraries were renamed at some point: `libgl1-mesa-glx` became `libgl1` after
+  Debian 11, and `libglib2.0-0` became `libglib2.0-0t64` in the 64-bit `time_t`
+  transition. The old names will not resolve on trixie.
 
 Two things to know about the hosted environment:
 
