@@ -93,6 +93,22 @@ GAIT_CRITICAL = (
     PL.LEFT_FOOT_INDEX, PL.RIGHT_FOOT_INDEX,
 )
 
+#: The landmarks gait *event detection* actually needs: the pelvis reference
+#: frame plus each foot. Deliberately excludes the knees.
+#:
+#: The knee is required for joint-angle curves but not for finding heel strike
+#: or toe-off, and in a sagittal view the far knee is the single most occluded
+#: landmark on the body -- it passes behind the near leg once per stride. Gating
+#: segmentation on it makes one non-essential landmark a single point of failure
+#: for the whole session, which on real footage rejects recordings whose feet
+#: were tracked perfectly well throughout.
+SEGMENTATION_CRITICAL = (
+    PL.LEFT_HIP, PL.RIGHT_HIP,
+    PL.LEFT_ANKLE, PL.RIGHT_ANKLE,
+    PL.LEFT_HEEL, PL.RIGHT_HEEL,
+    PL.LEFT_FOOT_INDEX, PL.RIGHT_FOOT_INDEX,
+)
+
 #: Used for the trunk segment and the pelvis reference frame.
 TRUNK = (PL.LEFT_SHOULDER, PL.RIGHT_SHOULDER, PL.LEFT_HIP, PL.RIGHT_HIP)
 

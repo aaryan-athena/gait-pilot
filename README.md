@@ -23,6 +23,11 @@ A four-page web UI for pilot testing: upload a video, get metrics, save it to a
 person's history, and view trends. It is built to **show its working**, because
 the failure mode that matters in a pilot is a plausible-looking wrong number:
 
+- **Recording feedback** names what was wrong with the *video* and what to
+  change — subject too small, camera not side-on, loose clothing hiding the
+  legs, walk too short — ranked so the one change that will help most comes
+  first. This sits above the metrics, because when a recording is the reason a
+  metric is missing that is the first thing the tester needs to read;
 - every unmeasurable metric states *why* it could not be measured;
 - every unreliable one carries its caveat next to the value, not in a footnote;
 - detected heel strikes and toe-offs are plotted over the raw signal, so a
@@ -111,30 +116,42 @@ false` in the config for air-gapped installs and place the file there yourself.
 Then check everything works:
 
 ```bash
-pytest                                   # 137 tests, no video needed
+pytest                                   # 154 tests, no video needed
 gaitscreen probe sample_video/*.mp4      # what the sample clips will support
 ```
 
 ## Recording protocol
 
-The measurement is only as good as the recording. In order of impact:
+Ordered by what actually went wrong on real pilot recordings, not by theory. The
+app reports which of these applied to each clip, so this list is the reference
+rather than something to memorise.
 
-1. **60 fps.** At 25–30 fps the frame interval is as large as the stride-time
-   standard deviation being measured, so stride-time variability — the most
-   fall-risk-predictive metric — is degraded to indicative only.
-2. **Fixed camera on a tripod, side-on.** Do not pan or follow the subject. A
-   camera that tracks the walker cancels the displacement that gait speed is
-   computed from, and the tool will refuse to report speed.
-3. **Frame the whole walk.** The subject must cross a good fraction of the frame.
-4. **Multiple passes per session**, one in each direction. Two reasons: enough
-   strides for a stable variability estimate, and each limb gets to be the
-   near (unoccluded) limb once, which is what makes left/right asymmetry
-   trustworthy from a single camera.
-5. **Don't move the camera between sessions.** If you must, recalibrate. The tool
-   detects probable camera movement and suppresses distance metrics rather than
+1. **Two to three passes back and forth, in one recording.** The most common
+   reason a session cannot be measured. There is a hard geometric trade-off:
+   framed well, a person covers most of the frame in two or three strides, so a
+   single walk-past yields 2–5 strides where 10 are needed for a variability
+   figure. Zooming out to fit more strides makes the subject too small instead.
+   Passes also let each leg be the near (unoccluded) one, which is what makes
+   left/right asymmetry trustworthy from a single camera.
+2. **Fill at least half the frame height with the person.** Landmark error is a
+   roughly fixed number of pixels, so subject size sets the precision of
+   everything downstream.
+3. **Legs and ankles visible.** Loose or flowing trousers hide the knee and
+   ankle, and the tracker then infers their position rather than seeing it —
+   producing confident, wrong numbers rather than missing ones.
+4. **Fixed camera, square to the walking path.** Tripod or propped, never
+   handheld, never following the walker — a camera that tracks the subject
+   cancels the displacement gait speed is computed from.
+5. **Whole walk inside the frame**, feet above the bottom edge throughout.
+6. **60 fps.** At 25–30 fps the frame interval is as large as the stride-time
+   standard deviation being measured, degrading variability to indicative only.
+7. **Only the walker in shot.** Bystanders can make the tracker switch person
+   mid-recording.
+8. **Don't move the camera between sessions.** If you must, recalibrate — the
+   tool detects probable movement and suppresses distance metrics rather than
    reporting rescaled ones.
-6. **Record assistive-device use in session metadata.** Pose estimation cannot see
-   a cane.
+9. **Record assistive-device use in session metadata.** Pose estimation cannot
+   see a cane.
 
 ## Usage
 
@@ -188,6 +205,18 @@ Decisions where the implementation departs from the obvious approach, and why:
   time base; short gaps are interpolated, long ones split the recording into
   separate analysis segments. Dropping frames would compress the time axis and
   shorten every stride time it touched.
+- **Segmentation gates on the feet and pelvis, not the knees.** Requiring every
+  gait joint continuously made the far knee — the most occluded landmark in a
+  sagittal view, since it passes behind the near leg each stride — a single point
+  of failure for the whole session. On pilot footage it was present for 60% of
+  frames with a longest clean run of 1.4s, while every foot landmark had runs
+  over six seconds. The knee is needed for angle curves, not for finding heel
+  strike, so its absence now degrades the curves instead of discarding the
+  recording. Combined with basing the minimum segment length on the *minimum*
+  stride time rather than the maximum, this turned the pilot set from mostly
+  unusable into mostly measurable: **31 of 47 real recordings (66%) produced no
+  metrics at all before the change; 43 of 47 (91%) now yield at least three**,
+  with cadence 74-129 steps/min and stride times 0.93-1.70s across the set.
 - **Stride period is estimated before events are detected.** A fixed minimum
   peak separation cannot serve both a brisk walker and a slow one: set it low
   and one heel strike is counted twice, set it high and every second strike is

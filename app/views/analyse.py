@@ -9,7 +9,8 @@ import streamlit as st
 
 from app.shared import (PROJECT_ROOT, VIDEO_TYPES, bullet_list, disclaimer,
                         open_repository, render_flags, render_metrics,
-                        save_upload)
+                        render_recording_feedback,
+                        render_recording_measurements, save_upload)
 from gaitscreen.config import Config
 from gaitscreen.pipeline import analyse_video, persist_session
 from gaitscreen.reporting import charts
@@ -17,23 +18,40 @@ from gaitscreen.segmentation.events import independent_cadence_spm
 from gaitscreen.version import ALGO_NOTES, ALGO_VERSION
 
 RECORDING_GUIDANCE = """
-**In order of how much it matters:**
+**In order of how much it matters.** These come from what actually went wrong on
+real pilot recordings, not from theory.
 
-1. **Record at 60 fps.** At 25–30 fps the gap between frames (33–40 ms) is as
-   large as the stride-to-stride variation being measured (25–35 ms), so
-   stride-time variability — the most fall-risk-predictive metric here — drops
-   to indicative only.
-2. **Fixed camera on a tripod, filming from the side.** Do not pan or follow the
-   subject. A camera that tracks the walker cancels out the movement gait speed
-   is calculated from, and the tool will refuse to report a speed.
-3. **Frame the whole walk** so the person crosses most of the frame.
-4. **Several passes per session, one in each direction.** This gives enough
-   strides for a stable variability figure, and lets each leg be the near
-   (unobstructed) leg once, which is what makes left/right comparison
-   trustworthy from a single camera.
-5. **Don't move the camera between sessions.** If you must, recalibrate — the
-   tool detects probable camera movement and suppresses distance metrics rather
-   than reporting rescaled ones.
+1. **Two to three passes back and forth, in one recording.** This is the most
+   common reason a session cannot be measured. There is a hard trade-off: framed
+   well, a person filling half the frame covers most of it in two or three
+   strides, so a single walk-past yields two to five strides where ten are
+   needed for a variability figure. You cannot fix this by zooming out — that
+   just makes the subject too small. Walk them up and back, two or three times,
+   in the same clip.
+2. **Fill at least half the frame height with the person.** Foot position can
+   only be located to within a pixel or two, so how big they are in frame sets
+   the precision of everything. Head to floor, with a little room to spare.
+3. **Legs and ankles visible.** Loose or flowing trousers hide the knee and
+   ankle, and the tracker then *infers* where they are rather than seeing them —
+   producing confident, wrong numbers. Fitted trousers, leggings, shorts, or
+   loose trousers rolled up.
+4. **Fixed camera, square to the walking path.** On a tripod or propped against
+   something solid — never handheld, and never following the person. Stand level
+   with the middle of the path so they cross the frame sideways rather than
+   moving towards or away from you.
+5. **Whole walk inside the frame.** Start recording once they are already fully
+   in shot and walking; stop after they finish. Feet must stay above the bottom
+   edge throughout.
+6. **60 fps.** At 25–30 fps the gap between frames is as large as the
+   stride-to-stride variation being measured, which degrades the single most
+   fall-risk-predictive metric to indicative only.
+7. **Only the walker in shot.** Bystanders in the background can make the
+   tracker jump to a different person mid-recording.
+8. **Record assistive-device use in the sidebar.** Pose estimation cannot see a
+   cane — it detects bodies, not objects.
+
+After analysing, the **Recording feedback** section tells you which of these
+applied to your clip and what to change.
 """
 
 
@@ -164,7 +182,18 @@ def _render_result(cfg: Config, result, notes: str) -> None:
             f"{len(analysis.passes)} pass(es)"
         )
 
+    # Recording feedback sits above the metrics on purpose. When a recording is
+    # the reason a metric is missing, that is the first thing the person needs to
+    # read -- not something to discover after scrolling past six empty cards.
+    st.subheader("Recording feedback")
+    render_recording_feedback(result.diagnostics)
+
     st.subheader("Metrics")
+    if result.diagnostics.blockers:
+        st.caption(
+            "Some metrics below are missing because of the recording problems "
+            "above, not because of anything about the person's walking."
+        )
     render_metrics(result.metrics)
 
     st.subheader("Did the detection work?")
@@ -220,6 +249,10 @@ def _render_diagnostics(cfg: Config, result) -> None:
             bullet_list(result.all_notes)
         else:
             st.markdown("No caveats raised.")
+
+        st.markdown("---")
+        st.markdown("**Recording measurements**")
+        render_recording_measurements(result.diagnostics)
 
         st.markdown("---")
         left, right = st.columns(2)

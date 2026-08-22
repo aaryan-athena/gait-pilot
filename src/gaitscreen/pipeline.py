@@ -31,6 +31,7 @@ from .pose import landmarker
 from .pose.to_pixels import subject_pixel_height, to_pixels
 from .signal import filters, resample
 from .quality import feasibility
+from .quality.diagnostics import RecordingReport, diagnose
 from .quality.score import score_session
 from .storage.artifacts import SessionArtifacts
 from .storage.repository import SessionRecord, SessionRepository, make_session_id
@@ -139,6 +140,7 @@ class SessionResult:
     analysis: SessionAnalysis
     quality: QualityReport
     flags: FlagResult
+    diagnostics: RecordingReport
     user_id: str
     session_date: str
     session_id: str
@@ -199,12 +201,17 @@ def analyse_video(
         analysis.metrics, quality,
         history if history is not None else pd.DataFrame(), cfg,
     )
+    # Diagnostics run last: they describe the *recording*, and the most useful
+    # of them (how many strides survived) is only known once segmentation has
+    # been attempted.
+    recording = diagnose(extraction, analysis, cfg)
 
     return SessionResult(
         extraction=extraction,
         analysis=analysis,
         quality=quality,
         flags=flags,
+        diagnostics=recording,
         user_id=user_id,
         session_date=session_date,
         session_id=make_session_id(user_id, session_date, str(extraction.info.path)),
@@ -247,6 +254,12 @@ def persist_session(
         "direction_method": result.analysis.direction_method,
         "event_agreement_ms": result.analysis.event_agreement_ms,
         "notes": result.all_notes,
+        "recording_diagnostics": [
+            {"code": d.code, "severity": d.severity, "title": d.title,
+             "detail": d.detail, "fix": d.fix, "measured": d.measured}
+            for d in result.diagnostics.diagnostics
+        ],
+        "recording_measurements": result.diagnostics.measurements,
     })
     if cfg["storage.keep_raw_landmarks"]:
         artifacts.save_raw_landmarks(result.extraction.raw)
@@ -279,6 +292,10 @@ def persist_session(
         },
         artifacts_dir=result.artifacts_dir,
         notes=notes,
+        recording_diagnostics=[
+            {"code": d.code, "severity": d.severity, "title": d.title}
+            for d in result.diagnostics.diagnostics
+        ],
     )
     session_id = repository.upsert_session(record)
     repository.save_flags(session_id, result.flags.flags)

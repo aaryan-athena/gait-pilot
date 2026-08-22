@@ -95,6 +95,8 @@ def _render_tables(repository, history: pd.DataFrame) -> None:
             hide_index=True, use_container_width=True,
         )
 
+    _render_recording_history(history)
+
     with st.expander("All flags raised"):
         rows = []
         for _, row in history.iterrows():
@@ -120,3 +122,42 @@ def _flagged_dates(repository, history: pd.DataFrame) -> dict[str, list]:
         for flag in repository.flags_for_session(row["session_id"]):
             out.setdefault(flag.metric, []).append(row["session_date"])
     return out
+
+
+def _render_recording_history(history: pd.DataFrame) -> None:
+    """Recording problems across the history.
+
+    A trend that looks flat, or that has gaps in it, may be the camera rather
+    than the person. Showing the recurring recording problems alongside the
+    trends is what lets someone tell those apart -- and a problem that appears in
+    most sessions is a setup to fix once, not a run of bad luck.
+    """
+    import collections
+    import json
+
+    counts: collections.Counter = collections.Counter()
+    titles: dict[str, str] = {}
+    for raw in history.get("recording_diagnostics_json", []):
+        if not raw:
+            continue
+        for entry in json.loads(raw):
+            counts[entry["code"]] += 1
+            titles[entry["code"]] = entry.get("title", entry["code"])
+
+    with st.expander("Recording problems across these sessions"):
+        if not counts:
+            st.write("No recording problems recorded for these sessions.")
+            return
+        total = len(history)
+        st.caption(
+            "A flat or gappy trend can be the camera rather than the person. "
+            "Anything appearing in most sessions is one setup change away from "
+            "being fixed for good."
+        )
+        st.dataframe(
+            pd.DataFrame([
+                {"problem": titles[code], "sessions affected": f"{n} of {total}"}
+                for code, n in counts.most_common()
+            ]),
+            hide_index=True, use_container_width=True,
+        )

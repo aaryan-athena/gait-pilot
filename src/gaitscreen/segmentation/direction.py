@@ -50,7 +50,15 @@ def _foot_axis_sign(series: PixelSeries) -> np.ndarray:
         toe = series.point(SIDE_LANDMARKS[side]["foot_index"])[:, 0]
         heel = series.point(SIDE_LANDMARKS[side]["heel"])[:, 0]
         signs.append(toe - heel)
-    return np.nanmean(np.column_stack(signs), axis=1)
+    stacked = np.column_stack(signs)
+    # All-NaN rows are expected when the feet are untracked; nanmean warns on
+    # them, and the caller already treats NaN as "no information".
+    with np.errstate(invalid="ignore"):
+        empty = np.isnan(stacked).all(axis=1)
+        out = np.full(stacked.shape[0], np.nan)
+        if (~empty).any():
+            out[~empty] = np.nanmean(stacked[~empty], axis=1)
+    return out
 
 
 def _facing_sign(series: PixelSeries) -> np.ndarray:

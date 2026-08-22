@@ -28,16 +28,36 @@ Two things address this:
 **Record at 60 fps if you care about this metric.** At 25–30 fps, treat variability
 as indicative and rely on the other metrics.
 
-## 2. A single short walk does not contain enough strides
+## 2. Framing and stride count trade off against each other
 
-A CV computed from 4–8 strides is unstable; the literature generally wants 12–30.
+This is the single most common reason a pilot recording cannot be measured, and
+it is a geometric constraint rather than a software one.
+
+Precision depends on how many pixels tall the subject is: landmark error is
+roughly a fixed number of pixels, so a small subject means large relative error.
+But a well-framed subject — filling half the frame — has a stride length of
+roughly 1.4 leg lengths, which covers a third of the frame width. Two or three
+strides and they have crossed it.
+
+So a single walk-past at good framing yields **two to five strides**, where ten
+are needed before stride-time variability means anything. Zooming out to fit more
+strides makes the subject too small and degrades every measurement instead.
+
+The only resolution is **two to three passes back and forth within one
+recording**. This is not optional advice; a single short pass cannot produce a
+variability figure at any framing. It also happens to fix the asymmetry bias in
+limitation 7, since each leg gets to be the near leg.
+
 Configured minimum is `features.min_strides_for_cv` (default 10); below that the
-CV is reported as null and low-confidence rather than as a misleadingly precise
-number.
+CV is reported as null rather than as a misleadingly precise number, and the
+recording diagnostics say how much more walking is needed.
 
-To get enough strides in a domestic hallway, record **multiple passes** in one
-session. The first and last stride of each pass are excluded automatically
-(acceleration and deceleration inflate variability), as are turns.
+How binding this is, measured on the pilot set of 47 phone recordings: the median
+clip yielded **4 usable strides** and exactly **one clip of 47 reached ten**. So
+under a single-pass protocol, stride-time variability — the metric the geriatric
+literature rates most highly for fall risk — is effectively never available. This
+is the one limitation that a change in recording practice, rather than a change in
+software, actually removes.
 
 ## 3. Gait speed needs a static camera and real forward travel
 
@@ -189,7 +209,58 @@ CV cutoffs, the MDC values — is a placeholder drawn from general reading. **Re
 all of them against current geriatric literature, and validate against your own
 population, before any real-world use.**
 
-## 15. `z` coordinates are not used
+## 15. What the tool tells you about a bad recording
+
+Earlier versions reported symptoms — "only 3 valid strides were recovered" —
+which left whoever recorded the video guessing at the cause, so the next
+recording failed the same way. Every session now also carries **recording
+diagnostics**: measured properties of the video paired with the specific change
+that fixes each one. They appear above the metrics in the app, and in
+`gaitscreen analyze` output.
+
+What is checked, and what each is measured from:
+
+| Diagnostic | Measured from |
+| --- | --- |
+| Subject too small | subject pixel height / frame height, and leg length in px |
+| Subject not in frame | fraction of frames with every gait joint inside the frame |
+| Feet clipped | foot landmarks at or past the bottom edge |
+| Oblique camera angle | horizontal shoulder separation vs the width implied by trunk height |
+| Legs poorly visible | lower-body landmark visibility relative to torso |
+| Unsteady foot tracking | frame-to-frame heel jitter, as a fraction of leg length |
+| Tracking switched person | single-frame body displacement beyond what walking allows |
+| Camera shake | background path length beyond any steady pan |
+| Walk too short | usable strides against the number needed |
+| Frame rate too low | reported fps |
+
+Two limits worth knowing:
+
+**The camera-angle estimate has a floor.** Pose estimation infers the position of
+the hidden far shoulder, so a genuinely side-on recording reads 9–23° rather than
+0° on pilot footage. The threshold (30°) is set above that floor, which means the
+check reliably catches badly oblique views but will not flag a mildly angled one.
+Treat a reading under 30° as "not obviously wrong" rather than as confirmation.
+
+**What fired, and how often.** On the 47-clip pilot set: walk too short 98%,
+subject not fully in frame 66%, subject too small 60%, legs poorly visible 57%,
+camera shake 26%, tracking switched person 15%, oblique angle 2%, low frame rate
+2%. The near-universal one is not a miscalibrated check — the median clip really
+did yield 4 strides against 10 needed — but it does mean the *ranking* is what
+makes the feedback usable: as the top-priority fix, "walk too short" led on only
+10 of 47 clips, behind subject size (17) and framing (16).
+
+The clothing check is the threshold most likely to need adjusting for a different
+population, since it depends on local dress. At 0.85 it flagged 57% of this set,
+which reflects a group where several people wore loose kurtas and flowing
+trousers rather than a fault in the check.
+
+**Thresholds are calibrated on one pilot set** — 47 phone recordings, 832×464 to
+1920×1080, mostly 60 fps. They are engineering limits rather than clinical ones,
+but they are still specific to that camera and setting, and should be re-checked
+against yours. Where a threshold could not be set from observed data, the config
+says so inline.
+
+## 16. `z` coordinates are not used
 
 MediaPipe's `z` is a depth estimate relative to the hip midpoint in units that are
 neither metric nor reliable. It is archived for completeness and never computed

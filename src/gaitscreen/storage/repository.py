@@ -61,6 +61,7 @@ class SessionRecord:
     camera_side: Optional[str] = None
     assistive_device: Optional[str] = None
     speed_feasibility: Optional[dict] = None
+    recording_diagnostics: Optional[list] = None
     artifacts_dir: Optional[str] = None
     notes: Optional[str] = None
 
@@ -171,6 +172,10 @@ class SessionRepository:
             "low_confidence_metrics_json": json.dumps(metrics.low_confidence_metrics),
             "speed_feasibility_json": (
                 json.dumps(record.speed_feasibility) if record.speed_feasibility else None
+            ),
+            "recording_diagnostics_json": (
+                json.dumps(record.recording_diagnostics)
+                if record.recording_diagnostics else None
             ),
             "artifacts_dir": str(record.artifacts_dir) if record.artifacts_dir else None,
             "notes": record.notes,

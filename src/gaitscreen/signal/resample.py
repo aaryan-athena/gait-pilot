@@ -17,7 +17,7 @@ from __future__ import annotations
 import numpy as np
 
 from ..config import Config
-from ..pose.schema import GAIT_CRITICAL
+from ..pose.schema import SEGMENTATION_CRITICAL
 from ..types import PixelSeries
 
 
@@ -68,16 +68,28 @@ def fill_short_gaps(series: PixelSeries, cfg: Config) -> tuple[PixelSeries, dict
 def analysis_segments(
     series: PixelSeries, cfg: Config, *, min_frames: int | None = None
 ) -> list[tuple[int, int]]:
-    """Frame ranges where all gait-critical landmarks are present.
+    """Frame ranges where the landmarks event detection needs are present.
 
-    Segments shorter than ``min_frames`` (default: one maximum stride) are
-    discarded -- they cannot contain a complete gait cycle.
+    Two details here decide whether real footage is usable at all.
+
+    **Which landmarks.** Only :data:`SEGMENTATION_CRITICAL` -- pelvis and feet.
+    Requiring the knees as well makes the far knee, the most occluded landmark
+    in a sagittal view, a single point of failure: on pilot footage it was
+    present for only 60% of frames with a longest clean run of 1.4s, while every
+    foot landmark had continuous runs above six seconds. Knees matter for the
+    angle curves, and those degrade on their own where a knee is missing.
+
+    **How long.** A segment must be able to hold a whole gait cycle, so the
+    floor is a multiple of the *minimum* stride time. Using the maximum stride
+    time instead demands 2.5s of unbroken tracking to measure a 0.9s stride,
+    which discards usable walking for no reason.
     """
     if min_frames is None:
-        min_stride = float(cfg["segmentation.max_stride_time_s"])
-        min_frames = max(4, int(round(min_stride * series.fps)))
+        min_stride = float(cfg["segmentation.min_stride_time_s"])
+        multiple = float(cfg.get("segmentation.min_segment_strides", 2.0))
+        min_frames = max(4, int(round(multiple * min_stride * series.fps)))
 
-    usable = np.isfinite(series.xy[:, list(GAIT_CRITICAL), :]).all(axis=(1, 2))
+    usable = np.isfinite(series.xy[:, list(SEGMENTATION_CRITICAL), :]).all(axis=(1, 2))
     return [
         (start, stop)
         for start, stop in _true_runs(usable)

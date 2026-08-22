@@ -317,6 +317,20 @@ def _report_session(result) -> None:
     else:
         print("  flags     : none")
 
+    report = result.diagnostics
+    if report.is_clean:
+        print("  recording : no problems found with the setup")
+    else:
+        counts = {}
+        for diagnostic in report.diagnostics:
+            counts[diagnostic.severity] = counts.get(diagnostic.severity, 0) + 1
+        tally = ", ".join(f"{n} {s}" for s, n in counts.items())
+        print(f"  recording : {tally}")
+        for diagnostic in report.diagnostics:
+            print(f"    [{diagnostic.severity.upper():8s}] {diagnostic.title}")
+            _print_warnings([diagnostic.detail], prefix="      - ")
+            _print_warnings([f"FIX: {diagnostic.fix}"], prefix="      > ")
+
     if result.all_notes:
         print("  notes     :")
         _print_warnings(result.all_notes, prefix="    ! ")

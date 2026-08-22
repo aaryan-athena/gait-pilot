@@ -110,3 +110,88 @@ def render_metrics(metrics) -> None:
 def bullet_list(items: Sequence[str]) -> None:
     for item in items:
         st.markdown(f"- {item}")
+
+
+#: A literal newline, kept as a name so the message strings below stay on
+#: one source line and cannot be mangled by escaping.
+NL = "\n"
+
+SEVERITY_STYLE = {
+    "blocker": ("🔴", "Stops the measurement"),
+    "major": ("🟠", "Makes results unreliable"),
+    "minor": ("🟡", "Worth improving"),
+}
+
+
+def render_recording_feedback(report, *, expanded: bool = True) -> None:
+    """Actionable feedback on the recording itself.
+
+    Kept visually separate from the clinical flags. A flag says something about
+    the person; this says something about the video, and confusing the two is
+    how a caregiver ends up worrying about a camera problem.
+    """
+    if report.is_clean:
+        st.success(
+            "**Recording quality looks good.** Nothing about the setup is holding "
+            "the measurement back."
+        )
+        return
+
+    counts = {}
+    for diagnostic in report.diagnostics:
+        counts[diagnostic.severity] = counts.get(diagnostic.severity, 0) + 1
+    summary = ", ".join(
+        f"{counts[s]} {SEVERITY_STYLE[s][1].lower()}"
+        for s in ("blocker", "major", "minor") if s in counts
+    )
+
+    headline = report.headline
+    lead = (
+        f"**Most important fix — {headline.title.lower()}.** {headline.fix}"
+        if headline else ""
+    )
+    body = lead + NL + NL + f'*Found: {summary}.*'
+    (st.error if report.blockers else st.warning)(body)
+
+    with st.expander(
+        f"All recording feedback ({len(report.diagnostics)})", expanded=expanded
+    ):
+        st.caption(
+            "These describe the **video**, not the person. Each one names what "
+            "was measured and what to change when recording again."
+        )
+        for diagnostic in report.diagnostics:
+            icon, label = SEVERITY_STYLE[diagnostic.severity]
+            st.markdown(f"#### {icon} {diagnostic.title}")
+            st.caption(label)
+            st.markdown(diagnostic.detail)
+            st.markdown(f"**What to do:** {diagnostic.fix}")
+            st.divider()
+
+
+def render_recording_measurements(report) -> None:
+    """The raw numbers behind the feedback, for anyone tuning a setup."""
+    labels = {
+        "subject_height_frac": ("Subject height", "{:.0%} of frame"),
+        "leg_length_px": ("Leg length", "{:.0f} px"),
+        "fully_visible_frac": ("Fully in frame", "{:.0%} of clip"),
+        "camera_angle_deg": ("Off side-on by", "{:.0f}°"),
+        "lower_upper_visibility_ratio": ("Leg vs torso visibility", "{:.2f}"),
+        "foot_jitter_norm": ("Heel jitter", "{:.1%} of leg"),
+        "identity_jumps": ("Person switches", "{:.0f}"),
+        "feet_clipped_frac": ("Feet cut off", "{:.0%} of frames"),
+        "strides_valid": ("Usable strides", "{:.0f}"),
+        "fps": ("Frame rate", "{:.0f} fps"),
+    }
+    rows = []
+    for key, (label, fmt) in labels.items():
+        value = report.measurements.get(key)
+        if value is None:
+            continue
+        try:
+            rows.append({"measurement": label, "value": fmt.format(value)})
+        except (TypeError, ValueError):
+            continue
+    if rows:
+        import pandas as pd
+        st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)

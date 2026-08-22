@@ -61,9 +61,13 @@ def subject_pixel_height(series: PixelSeries) -> float:
     from ..pose.schema import PL
 
     nose_y = series.xy[:, PL.NOSE, 1]
-    ankle_y = np.nanmin(
-        series.xy[:, [PL.LEFT_ANKLE, PL.RIGHT_ANKLE], 1], axis=1
-    )
+    ankles = series.xy[:, [PL.LEFT_ANKLE, PL.RIGHT_ANKLE], 1]
+    # Frames where neither ankle was tracked are expected in poor recordings;
+    # nanmin warns on an all-NaN slice, and NaN is already the right answer.
+    both_missing = np.isnan(ankles).all(axis=1)
+    ankle_y = np.full(ankles.shape[0], np.nan)
+    if (~both_missing).any():
+        ankle_y[~both_missing] = np.nanmin(ankles[~both_missing], axis=1)
     heights = nose_y - ankle_y
     heights = heights[np.isfinite(heights)]
     return float(np.median(heights)) if heights.size else float("nan")

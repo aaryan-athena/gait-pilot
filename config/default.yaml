@@ -66,6 +66,10 @@ segmentation:
   subframe_refine: true
   min_stride_time_s: 0.6
   max_stride_time_s: 2.5
+  # A usable segment must be able to hold this many minimum-length
+  # strides. Gating on max_stride_time instead would demand 2.5s of
+  # unbroken tracking to measure a 0.9s stride.
+  min_segment_strides: 2.0
   peak_prominence_frac: 0.15 # of signal range
   # Acceleration/deceleration strides inflate variability -- drop them.
   exclude_strides_at_pass_edges: 1
@@ -111,6 +115,45 @@ quality:
     # Reciprocal arm swing is suppressed and asymmetric when a cane is used.
     max_wrist_swing_frac_of_leg_length: 0.08
     min_arm_swing_asymmetry_ratio: 2.0
+
+# Recording diagnostics: thresholds for the actionable feedback shown to
+# whoever recorded the video. These are about the *recording*, not the person,
+# so they are engineering limits rather than clinical ones -- but they were set
+# from real pilot footage, not from first principles, and should be re-checked
+# against your own camera and setting.
+diagnostics:
+  # Calibrated against the pilot test set (47 phone recordings, 832x464 to
+  # 1920x1080, mostly 60 fps), not chosen from first principles. Where a
+  # threshold could not be set from observed data that is noted inline.
+  #
+  # Subject size caps all downstream precision: landmark error in pixels is
+  # roughly fixed, so relative error scales inversely with subject size. Pilot
+  # clips ran 0.32-0.56 of frame height with legs of 86-324 px; the ones below
+  # this line produced measurably less consistent event detection.
+  min_subject_height_frac: 0.45
+  min_leg_length_px: 110
+  # Fraction of the clip in which every gait-critical joint is inside the frame.
+  min_fully_visible_frac: 0.60
+  # Estimated departure from a true side-on view, in degrees. At 30 degrees,
+  # horizontal distances are foreshortened ~13%.
+  max_sagittal_deviation_deg: 30
+  # Lower-body visibility relative to torso visibility. Loose clothing shows up
+  # here, and a hidden joint is estimated rather than absent -- confidently
+  # wrong, which is worse than missing.
+  min_lower_upper_visibility_ratio: 0.85
+  # Frame-to-frame heel jitter as a fraction of leg length. Pilot footage that
+  # tracked acceptably measured 0.000-0.003, so this sits well above the
+  # observed-good range while still being reachable -- a limit of 0.020 could
+  # never fire on any real recording and would be decoration.
+  max_foot_jitter_norm: 0.008
+  # A single-frame body displacement this large means the tracker changed person.
+  max_identity_jump_norm: 0.50
+  # Background back-and-forth beyond any steady pan, as a fraction of width.
+  max_camera_shake_frac: 0.020
+  # Strides wanted before variability is meaningful; mirrors
+  # features.min_strides_for_cv but expressed as recording advice.
+  min_strides_target: 10
+  target_fps: 50
 
 flagging:
   # --- Absolute thresholds (ILLUSTRATIVE -- review before deployment) ---

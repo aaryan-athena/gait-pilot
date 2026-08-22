@@ -325,11 +325,12 @@ def _fill_spatial(
         metrics.mark_unavailable("gait_speed_mps", speed.reason or "")
         return
     if not check.usable:
-        metrics.mark_unavailable(
-            "gait_speed_mps",
-            (check.reason or "calibration unavailable")
-            + " -- timing metrics above are unaffected by this",
-        )
+        reason = check.reason or "calibration unavailable"
+        # Some calibration reasons already say that scale-free metrics survive;
+        # appending the same reassurance again just reads as noise.
+        if "unaffected" not in reason:
+            reason += " -- the timing metrics are unaffected by this"
+        metrics.mark_unavailable("gait_speed_mps", reason)
         return
 
     value, reason = spatiotemporal.gait_speed_mps(

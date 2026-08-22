@@ -24,7 +24,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -101,6 +101,10 @@ CREATE TABLE IF NOT EXISTS sessions (
     metrics_unavailable_json      TEXT,
     low_confidence_metrics_json   TEXT,
     speed_feasibility_json        TEXT,
+    -- Recording diagnostics: codes only, so the trend view can show at a
+    -- glance whether a flat or gappy history is the person or the camera.
+    -- The full text lives in the session artifact directory.
+    recording_diagnostics_json    TEXT,
 
     artifacts_dir TEXT,
     notes         TEXT,
