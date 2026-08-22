@@ -41,14 +41,30 @@ in the repo exist for that deployment and are needed there:
 | file | why |
 | --- | --- |
 | `requirements.txt` | Python dependencies |
-| `packages.txt` | `libgl1`, `libglib2.0-0t64` — **required**, see below |
+| `packages.txt` | ten system libraries — **required**, see below |
 | `.streamlit/config.toml` | 400 MB upload limit for video files |
 
-`packages.txt` is not optional. `mediapipe` depends on `opencv-contrib-python`,
-which links against `libGL.so.1` and `libgthread-2.0.so.0`; neither is in the
-deployment image, and without them the app dies at import. Switching to headless
-OpenCV in `requirements.txt` does not help, because pip installs the full build
-anyway to satisfy mediapipe.
+`packages.txt` is not optional, and the entries are not guesswork — they are
+what the wheels' own ELF headers declare. Reading `DT_NEEDED` from the Linux
+wheels gives the exact list:
+
+- **mediapipe** needs `libEGL.so.1` and `libGLESv2.so.2`. Versions up to 0.10.18
+  vendored their own copies via auditwheel; from 0.10.20 on they do not, so the
+  OS must supply them.
+- **opencv-contrib-python** (pulled in by mediapipe, which is why headless
+  OpenCV in `requirements.txt` does not avoid any of this) needs `libGL.so.1`,
+  `libglib-2.0.so.0`, `libgthread-2.0.so.0`, `libz.so.1`, and — through its Qt
+  XCB platform plugin — `libX11`, `libXext`, `libxcb`, `libICE` and `libSM`.
+
+To re-derive the list after a dependency bump rather than discovering it one
+failed deploy at a time:
+
+```bash
+pip download mediapipe --platform manylinux_2_28_x86_64 \
+  --python-version 3.11 --only-binary :all: --no-deps -d /tmp/whl
+# then read DT_NEEDED from each .so in the wheel and drop the libc/libstdc++
+# entries and anything the wheel bundles itself
+```
 
 Three traps in that one small file, each of which produces a failed build rather
 than a useful message:
@@ -59,12 +75,11 @@ than a useful message:
   apostrophe anywhere in it breaks `xargs` before apt even runs.
 - **One bad name takes down the whole step.** apt installs nothing if any entry
   is unresolvable, so a wrong guess also loses the entries that were correct.
-  Verify names against `https://packages.debian.org/<suite>/<package>` before
-  adding them — a real package has a "Details of package" page, a virtual one
-  does not.
-- **Names are specific to the base image**, currently Debian trixie. Both
-  libraries were renamed at some point: `libgl1-mesa-glx` became `libgl1` after
-  Debian 11, and `libglib2.0-0` became `libglib2.0-0t64` in the 64-bit `time_t`
+  Check `https://packages.debian.org/<suite>/<package>` first: a real package has
+  a "Details of package" page, a virtual one does not.
+- **Names are specific to the base image**, currently Debian trixie. Both GL and
+  glib were renamed at some point: `libgl1-mesa-glx` became `libgl1` after Debian
+  11, and `libglib2.0-0` became `libglib2.0-0t64` in the 64-bit `time_t`
   transition. The old names will not resolve on trixie.
 
 Two things to know about the hosted environment:

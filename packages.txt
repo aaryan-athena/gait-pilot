@@ -1,2 +1,10 @@
+libegl1
+libgles2
 libgl1
 libglib2.0-0t64
+libx11-6
+libxext6
+libxcb1
+libice6
+libsm6
+zlib1g

@@ -12,7 +12,13 @@
 # 0.10.3x removed the legacy `mediapipe.solutions` API entirely, so the Tasks
 # PoseLandmarker is the only option and a .task model bundle must be downloaded
 # separately (see README). Do not relax this lower bound.
-mediapipe>=0.10.30            # verified: 0.10.35
+mediapipe>=0.10.30,<1.0       # verified: 0.10.35
+# Upper bound is deliberate. On Linux, pip would otherwise install
+# mediapipe 1.0.1 -- a major version this project's tests have never run
+# against, so a deployment would be executing different code from the one
+# that was verified. Both versions need the same OS libraries (see
+# packages.txt), so this pin is about API stability, not linking. Raise it
+# once the suite has been run against 1.x.
 
 # --- video and numerics ------------------------------------------------------
 opencv-python>=4.9            # verified: 5.0.0.93
