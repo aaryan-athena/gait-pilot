@@ -278,7 +278,28 @@ Two consequences to keep in mind when using it to judge a recording:
   detections were. If tracking looks good in the video but the foot-jitter
   diagnostic still fires, trust the diagnostic: it is measured before smoothing.
 
-## 17. `z` coordinates are not used
+## 17. A deployed fix is not necessarily a running fix
+
+Streamlit Community Cloud reloads the entry script when source changes but does
+**not** re-import modules already in `sys.modules`. It restarts the process only
+when *dependencies* change. Because the whole pipeline lives in an imported
+package, a source-only fix can sit on disk, unloaded, while the old code keeps
+running and the old error keeps appearing.
+
+The tell in the deploy log is a `Pulling code changes` / `Updated app!` pair with
+**no `Stopping...` and no `Uvicorn server started`** between them. Compare a real
+restart, which shows both.
+
+Two things follow:
+
+- After pushing a source-only change, **reboot the app** (Manage app → Reboot).
+  Pushing alone is not enough.
+- The sidebar shows the git revision, algorithm version and encoder revision of
+  the code actually loaded, and video failures quote the same string. If it is
+  older than what you deployed, the process needs rebooting rather than the code
+  needing another change.
+
+## 18. `z` coordinates are not used
 
 MediaPipe's `z` is a depth estimate relative to the hip midpoint in units that are
 neither metric nor reliable. It is archived for completeness and never computed
