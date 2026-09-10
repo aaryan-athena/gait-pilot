@@ -104,7 +104,7 @@ def _from_points(cfg: Config, user_id: str, path: Path) -> None:
         y1 = st.slider("Point 2 — y", 0, height - 1, int(height * 0.85))
 
     st.image(_annotate(frame, (x0, y0), (x1, y1)),
-             caption="Reference points", use_container_width=True)
+             caption="Reference points", width="stretch")
 
     distance_m = st.number_input(
         "Real distance between the two points (metres)",

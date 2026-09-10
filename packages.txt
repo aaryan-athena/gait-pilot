@@ -8,3 +8,4 @@ libxcb1
 libice6
 libsm6
 zlib1g
+ffmpeg

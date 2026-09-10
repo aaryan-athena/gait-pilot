@@ -92,7 +92,7 @@ def _render_tables(repository, history: pd.DataFrame) -> None:
         ]
         st.dataframe(
             history[[c for c in columns if c in history]],
-            hide_index=True, use_container_width=True,
+            hide_index=True, width="stretch",
         )
 
     _render_recording_history(history)
@@ -111,7 +111,7 @@ def _render_tables(repository, history: pd.DataFrame) -> None:
                 })
         if rows:
             st.dataframe(pd.DataFrame(rows), hide_index=True,
-                         use_container_width=True)
+                         width="stretch")
         else:
             st.write("No flags raised across this person's sessions.")
 
@@ -159,5 +159,5 @@ def _render_recording_history(history: pd.DataFrame) -> None:
                 {"problem": titles[code], "sessions affected": f"{n} of {total}"}
                 for code, n in counts.most_common()
             ]),
-            hide_index=True, use_container_width=True,
+            hide_index=True, width="stretch",
         )

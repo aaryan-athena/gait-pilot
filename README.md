@@ -19,21 +19,37 @@ are meaningful for a given recording.
 streamlit run app/main.py
 ```
 
-A four-page web UI for pilot testing: upload a video, get metrics, save it to a
-person's history, and view trends. It is built to **show its working**, because
-the failure mode that matters in a pilot is a plausible-looking wrong number:
+A four-page web UI for pilot testing: upload a video, get results, save the
+session to a person's history, and view trends.
 
+It is built to **show its working**, because the failure mode that matters in a
+pilot is a plausible-looking wrong number. The results are written for two
+readers, in the order each needs: a caregiver gets a plain verdict, six
+plainly-named measures and the annotated video, while a clinician or tester gets
+the same session's exact metric names, event plots and diagnostic numbers one
+expander down.
+
+- **Plain language throughout.** "Step-to-step consistency", not "stride-time
+  coefficient of variation". Each measure says what it is for and which
+  direction is good, since a reader cannot infer that from a number. No measure
+  is ever described as abnormal — a screening tool cannot diagnose, so its
+  vocabulary does not imply that it has.
+- **The annotated video** replays the clip with the tracked skeleton and the
+  detected heel strikes and toe-offs drawn on. Everything the tool reports rests
+  on the skeleton following the right joints and the events landing at the right
+  moments, and this is the only way a non-specialist can check either. Joints
+  whose position was *inferred* across a dropout are drawn hollow rather than
+  solid, so an estimate never looks like an observation.
 - **Recording feedback** names what was wrong with the *video* and what to
   change — subject too small, camera not side-on, loose clothing hiding the
-  legs, walk too short — ranked so the one change that will help most comes
-  first. This sits above the metrics, because when a recording is the reason a
-  metric is missing that is the first thing the tester needs to read;
-- every unmeasurable metric states *why* it could not be measured;
-- every unreliable one carries its caveat next to the value, not in a footnote;
-- detected heel strikes and toe-offs are plotted over the raw signal, so a
-  tester can see at a glance whether segmentation actually locked on;
-- an independent cadence check, sharing no code with the main detector, is shown
-  alongside the pipeline's own figure.
+  legs, walk too short — ranked so the one change that helps most comes first.
+- **Every unmeasurable metric states why**, in plain terms, and is grouped
+  separately so a reader is not stepping over blanks to find the results.
+- **Known measurement bias is disclosed where the number is shown.** Double
+  support reads 8–10 points high from 2D video, so it carries that caveat on its
+  card and is not allowed to headline the plain summary on the strength of an
+  absolute threshold — only on a change across sessions, where a consistent bias
+  cancels.
 
 Pages: **Analyse a walk**, **Trends**, **Calibration** (only needed for gait
 speed in m/s — everything else is scale-free), and **Limitations**.
@@ -46,7 +62,7 @@ in the repo exist for that deployment and are needed there:
 | file | why |
 | --- | --- |
 | `requirements.txt` | Python dependencies |
-| `packages.txt` | ten system libraries — **required**, see below |
+| `packages.txt` | system libraries plus `ffmpeg` — **required**, see below |
 | `.streamlit/config.toml` | 400 MB upload limit for video files |
 
 `packages.txt` is not optional, and the entries are not guesswork — they are
@@ -60,6 +76,13 @@ wheels gives the exact list:
   OpenCV in `requirements.txt` does not avoid any of this) needs `libGL.so.1`,
   `libglib-2.0.so.0`, `libgthread-2.0.so.0`, `libz.so.1`, and — through its Qt
   XCB platform plugin — `libX11`, `libXext`, `libxcb`, `libICE` and `libSM`.
+
+`ffmpeg` is there for a different reason: the annotated playback video needs
+H.264, and OpenCV's own H.264 writer cannot be relied on. At some frame sizes it
+reports success, fails to load its encoder, and writes a kilobyte of nothing —
+so frames are piped to ffmpeg instead. Without ffmpeg the app still works and
+still renders the video, but as MPEG-4 Part 2, which most browsers will not play;
+it then says so and offers a download rather than showing a dead player.
 
 To re-derive the list after a dependency bump rather than discovering it one
 failed deploy at a time:
@@ -116,7 +139,7 @@ false` in the config for air-gapped installs and place the file there yourself.
 Then check everything works:
 
 ```bash
-pytest                                   # 154 tests, no video needed
+pytest                                   # 181 tests, no video needed
 gaitscreen probe sample_video/*.mp4      # what the sample clips will support
 ```
 

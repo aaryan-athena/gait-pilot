@@ -211,6 +211,14 @@ storage:
 
 reporting:
   output_root: data/reports
+  # Annotated playback: the source video with the tracked skeleton and detected
+  # gait events drawn on. Exists so a viewer can confirm the skeleton followed
+  # the right joints and the heel strikes landed at the right moments -- neither
+  # of which a table of numbers can show.
+  overlay:
+    enabled: true
+    max_width: 720 # downscaled for playback; analysis always uses full frames
+    crf: 26 # libx264 quality, lower is better; 26 keeps clips small enough to stream
   metrics_to_plot:
     - gait_speed_mps
     - stride_time_cv_pct

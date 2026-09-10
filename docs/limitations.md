@@ -260,7 +260,25 @@ but they are still specific to that camera and setting, and should be re-checked
 against yours. Where a threshold could not be set from observed data, the config
 says so inline.
 
-## 16. `z` coordinates are not used
+## 16. The annotated video shows the analysis, not the raw tracking
+
+The skeleton drawn on the playback is the **filtered, gap-filled** trajectory --
+the same one the measurements were taken from, which is what makes it a fair
+check on those measurements. It is not a raw dump of what pose estimation
+returned frame by frame.
+
+Two consequences to keep in mind when using it to judge a recording:
+
+- Joints whose position was *interpolated* across a short dropout are drawn
+  hollow rather than solid, so an inferred position never looks like an observed
+  one. Long dropouts are not interpolated at all and simply leave the limb
+  undrawn -- a leg segment vanishing for a while is the far knee being occluded,
+  which is normal in a side-on view.
+- Smoothing means the drawn skeleton is slightly steadier than the raw
+  detections were. If tracking looks good in the video but the foot-jitter
+  diagnostic still fires, trust the diagnostic: it is measured before smoothing.
+
+## 17. `z` coordinates are not used
 
 MediaPipe's `z` is a depth estimate relative to the hip midpoint in units that are
 neither metric nor reliable. It is archived for completeness and never computed

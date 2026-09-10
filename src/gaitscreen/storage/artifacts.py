@@ -57,6 +57,11 @@ class SessionArtifacts:
     def report_path(self) -> Path:
         return self.dir / "report.html"
 
+    @property
+    def overlay_path(self) -> Path:
+        """The annotated playback video, kept with the rest of the session."""
+        return self.dir / "annotated.mp4"
+
     def ensure(self) -> Path:
         self.dir.mkdir(parents=True, exist_ok=True)
         return self.dir
