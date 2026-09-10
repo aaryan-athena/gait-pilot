@@ -6,6 +6,7 @@ frame sizes OpenCV's H.264 writer reports ``isOpened() == True``, fails to load
 its encoder, and writes about a kilobyte of nothing. Only the output tells the
 truth, so the output is what gets checked.
 """
+import pathlib
 import shutil
 import subprocess
 
@@ -219,3 +220,110 @@ def test_fallback_reports_unplayable_output_rather_than_hiding_it(cfg, tmp_path,
     assert result.codec == "mp4v"
     assert not result.browser_playable
     assert result.note and "browsers cannot play" in result.note
+
+
+# --------------------------------------------------------------------------
+# platform semantics of the ffmpeg pipe
+# --------------------------------------------------------------------------
+class _PosixLikeStdin:
+    """A pipe with POSIX ``BufferedWriter`` semantics.
+
+    The distinction that matters: flushing after close raises ``ValueError``,
+    not ``BrokenPipeError``. Windows' ``BufferedWriter`` is closed the same way
+    but ``Popen._communicate`` never flushes it, so the difference is invisible
+    there.
+    """
+
+    def __init__(self, broken=False):
+        self.closed = False
+        self.broken = broken
+        self.written = 0
+
+    def write(self, payload):
+        # A dead reader breaks the pipe; it does not close this end of it.
+        if self.broken:
+            raise BrokenPipeError(32, "Broken pipe")
+        if self.closed:
+            raise ValueError("write to closed file")
+        self.written += len(payload)
+
+    def flush(self):
+        if self.broken:
+            raise BrokenPipeError(32, "Broken pipe")
+        if self.closed:
+            raise ValueError("flush of closed file")
+
+    def close(self):
+        self.closed = True
+
+
+class _PosixLikeProcess:
+    """``Popen`` with the POSIX ``_communicate`` stdin handling.
+
+    Mirrors CPython's POSIX branch exactly: flush stdin, tolerating only
+    ``BrokenPipeError``, then close it.
+    """
+
+    def __init__(self, returncode=0, stderr=b"", broken=False):
+        self.stdin = _PosixLikeStdin(broken=broken)
+        self.returncode = returncode
+        self._stderr = stderr
+
+    def communicate(self, timeout=None):
+        try:
+            self.stdin.flush()
+        except BrokenPipeError:
+            pass
+        self.stdin.close()
+        return None, self._stderr
+
+
+def _writer_with(process):
+    writer = object.__new__(overlay_module._FfmpegWriter)
+    writer.path = pathlib.Path("annotated.mp4")
+    writer._proc = process
+    return writer
+
+
+def test_close_does_not_flush_an_already_closed_pipe():
+    """Regression: 'flush of closed file' on the deployed Linux app.
+
+    ``close()`` used to close stdin itself and then call ``communicate()``,
+    which on POSIX flushes stdin unconditionally and so raised ``ValueError``
+    on the closed pipe. Every test ran on Windows, whose threaded
+    ``_communicate`` closes without flushing, so the suite passed while the
+    deployment failed. This test supplies POSIX semantics directly, so it
+    catches the bug on any platform.
+    """
+    process = _PosixLikeProcess()
+    writer = _writer_with(process)
+    writer.write(np.zeros((4, 4, 3), np.uint8))
+
+    result = writer.close()  # must not raise ValueError
+
+    assert result.codec == "h264"
+    assert process.stdin.closed, "communicate() should have closed the pipe"
+    assert process.stdin.written > 0
+
+
+def test_nonzero_exit_reports_what_ffmpeg_said():
+    process = _PosixLikeProcess(returncode=1, stderr=b"Invalid argument\n")
+    writer = _writer_with(process)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        writer.close()
+    message = str(excinfo.value)
+    assert "code 1" in message
+    assert "Invalid argument" in message
+
+
+def test_write_to_a_dead_encoder_explains_itself():
+    """A broken pipe mid-render must surface ffmpeg's reason, not a pipe error."""
+    process = _PosixLikeProcess(
+        returncode=255, stderr=b"height not divisible by 2\n", broken=True,
+    )
+    writer = _writer_with(process)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        writer.write(np.zeros((4, 4, 3), np.uint8))
+    assert "height not divisible by 2" in str(excinfo.value)

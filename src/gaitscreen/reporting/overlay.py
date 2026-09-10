@@ -18,6 +18,9 @@ actually produced rather than believing the API. Its last resort, ``mp4v``, is
 MPEG-4 Part 2, which most browsers refuse to play -- that path still returns a
 file, but says it is not playable so the app can offer a download instead of a
 dead player.
+
+One platform trap, recorded because it cost a deployment: ``Popen.communicate()``
+must be left to close the stdin pipe itself. See :meth:`_FfmpegWriter.close`.
 """
 from __future__ import annotations
 
@@ -305,18 +308,40 @@ class _FfmpegWriter:
         )
 
     def write(self, frame) -> None:
-        self._proc.stdin.write(np.ascontiguousarray(frame).tobytes())
+        try:
+            self._proc.stdin.write(np.ascontiguousarray(frame).tobytes())
+        except (BrokenPipeError, ValueError) as exc:
+            # ffmpeg has gone away mid-render. Its own stderr says why; a raw
+            # pipe error does not.
+            raise RuntimeError(self._exit_message()) from exc
 
     def close(self) -> OverlayResult:
-        self._proc.stdin.close()
+        # `communicate()` owns flushing and closing stdin, and must be left to
+        # do both. Closing stdin here first and then calling it crashes on
+        # POSIX: `communicate()` flushes stdin unconditionally and tolerates
+        # only BrokenPipeError, so an already-closed pipe raises
+        # ValueError("flush of closed file"). Windows takes a threaded path that
+        # closes without flushing and so tolerates the double close, which is
+        # why this survived local testing and only surfaced once deployed to
+        # Linux.
         _, stderr = self._proc.communicate()
         if self._proc.returncode != 0:
-            raise RuntimeError(
-                f"ffmpeg failed ({self._proc.returncode}): "
-                f"{stderr.decode('utf-8', 'replace')[:400]}"
-            )
+            raise RuntimeError(self._exit_message(stderr))
         return OverlayResult(path=self.path, codec="h264", browser_playable=True,
                              n_frames=0)
+
+    def _exit_message(self, stderr: bytes | None = None) -> str:
+        """ffmpeg's own explanation, which is far more useful than a pipe error."""
+        if stderr is None:
+            try:
+                _, stderr = self._proc.communicate(timeout=15)
+            except Exception:  # noqa: BLE001 - we are already reporting a failure
+                stderr = b""
+        detail = (stderr or b"").decode("utf-8", "replace").strip()
+        return (
+            f"ffmpeg exited with code {self._proc.returncode}"
+            + (f": {detail[:400]}" if detail else " and gave no explanation")
+        )
 
 
 class _OpenCvWriter:
