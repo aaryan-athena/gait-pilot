@@ -110,6 +110,14 @@ than a useful message:
   11, and `libglib2.0-0` became `libglib2.0-0t64` in the 64-bit `time_t`
   transition. The old names will not resolve on trixie.
 
+**Reboot after a source-only push.** Streamlit Cloud reloads the entry script
+when source changes but does not re-import modules already in `sys.modules`; it
+restarts the process only when *dependencies* change. Because the pipeline lives
+in an imported package, a pushed fix can sit on disk unloaded while the old code
+keeps running. The tell in the deploy log is a `Pulling code changes` /
+`Updated app!` pair with **no `Stopping...` and no `Uvicorn server started`**
+between them — a real restart shows both. Use Manage app → Reboot.
+
 Two things to know about the hosted environment:
 
 - **The filesystem is ephemeral.** The session database, uploaded videos and

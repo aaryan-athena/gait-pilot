@@ -61,18 +61,3 @@ def test_analyse_page_waits_for_an_upload():
 
     assert not app.exception
     assert any("Upload a video" in info.value for info in app.info)
-
-
-def test_sidebar_identifies_the_running_code():
-    """Streamlit Cloud hot-reloads source without re-importing modules.
-
-    A fix can therefore sit on disk, unloaded, while the old code keeps
-    producing the old error -- which is indistinguishable from the fix not
-    working unless the running revision is visible. This cost three deploy
-    cycles, so it is displayed and asserted.
-    """
-    app = _boot()
-    captions = [caption.value for caption in app.sidebar.caption]
-    assert captions, "the sidebar must identify the loaded code"
-    assert "encoder rev" in captions[0]
-    assert "algo" in captions[0]

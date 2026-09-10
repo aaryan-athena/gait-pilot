@@ -29,7 +29,7 @@ st.set_page_config(page_title="Gait screening pilot", page_icon="🚶", layout="
 
 from app.shared import get_config  # noqa: E402
 from app.views import analyse, calibration, limitations, trends  # noqa: E402
-from gaitscreen.buildinfo import describe  # noqa: E402
+from gaitscreen.version import ALGO_VERSION  # noqa: E402
 
 PAGES = {
     "Analyse a walk": analyse.render,
@@ -43,9 +43,7 @@ def main() -> None:
     cfg = get_config()
 
     st.sidebar.title("🚶 Gait screening")
-    # Identifies the code actually loaded in this process, which on a hot
-    # reload is not necessarily the code that was last deployed.
-    st.sidebar.caption(describe(PROJECT_ROOT))
+    st.sidebar.caption(f"pilot build · algorithm {ALGO_VERSION}")
     choice = st.sidebar.radio("Page", list(PAGES), label_visibility="collapsed")
     st.sidebar.divider()
 

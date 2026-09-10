@@ -20,7 +20,6 @@ from app.shared import (PROJECT_ROOT, VIDEO_TYPES, bullet_list, disclaimer,
                         render_recording_measurements, save_upload)
 from app.widgets_plain import (render_annotated_video, render_plain_cards,
                                render_verdict)
-from gaitscreen.buildinfo import describe
 from gaitscreen.config import Config
 from gaitscreen.pipeline import analyse_video, persist_session
 from gaitscreen.reporting import charts
@@ -213,12 +212,7 @@ def _render_overlay(cfg: Config, result, progress) -> dict | None:
             "note": overlay.note,
         }
     except Exception as exc:  # noqa: BLE001
-        st.warning(
-            f"Could not create the annotated video: {exc}\n\n"
-            f"Running code: {describe(PROJECT_ROOT)}. If that revision is older "
-            "than what you deployed, this process is running stale modules — "
-            "reboot the app rather than changing the code."
-        )
+        st.warning(f"Could not create the annotated video: {exc}")
         return None
 
 
