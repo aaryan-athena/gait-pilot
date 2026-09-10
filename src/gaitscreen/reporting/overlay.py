@@ -316,27 +316,54 @@ class _FfmpegWriter:
             raise RuntimeError(self._exit_message()) from exc
 
     def close(self) -> OverlayResult:
-        # `communicate()` owns flushing and closing stdin, and must be left to
-        # do both. Closing stdin here first and then calling it crashes on
-        # POSIX: `communicate()` flushes stdin unconditionally and tolerates
-        # only BrokenPipeError, so an already-closed pipe raises
-        # ValueError("flush of closed file"). Windows takes a threaded path that
-        # closes without flushing and so tolerates the double close, which is
-        # why this survived local testing and only surfaced once deployed to
-        # Linux.
-        _, stderr = self._proc.communicate()
+        stderr = self._shutdown()
         if self._proc.returncode != 0:
             raise RuntimeError(self._exit_message(stderr))
         return OverlayResult(path=self.path, codec="h264", browser_playable=True,
                              n_frames=0)
 
+    def _shutdown(self) -> bytes:
+        """Signal end-of-input, drain ffmpeg's stderr, and reap the process.
+
+        Deliberately does not use ``communicate()``. That helper flushes stdin
+        before doing anything else and tolerates only ``BrokenPipeError``, so if
+        stdin has already been closed -- which happens whenever this is reached
+        twice, or after a write failed -- it raises
+        ``ValueError("flush of closed file")`` on POSIX while working fine on
+        Windows. Depending on those internals is what let a Linux-only failure
+        through a green Windows test suite, so the sequence is spelled out here
+        instead: close stdin so ffmpeg sees EOF and finalises the file, read its
+        stderr to the end, then reap it.
+
+        Draining stderr before ``wait()`` is the ordering that matters: waiting
+        first would deadlock if ffmpeg had filled the stderr pipe. With stdout
+        sent to /dev/null there is only this one pipe to drain, so a plain read
+        is sufficient.
+        """
+        stdin = self._proc.stdin
+        if stdin is not None and not stdin.closed:
+            try:
+                stdin.close()
+            except OSError:
+                pass  # ffmpeg already exited; nothing left to tell it.
+
+        stderr = b""
+        pipe = self._proc.stderr
+        if pipe is not None and not pipe.closed:
+            try:
+                stderr = pipe.read() or b""
+            except OSError:
+                pass
+            finally:
+                pipe.close()
+
+        self._proc.wait()
+        return stderr
+
     def _exit_message(self, stderr: bytes | None = None) -> str:
         """ffmpeg's own explanation, which is far more useful than a pipe error."""
         if stderr is None:
-            try:
-                _, stderr = self._proc.communicate(timeout=15)
-            except Exception:  # noqa: BLE001 - we are already reporting a failure
-                stderr = b""
+            stderr = self._shutdown()
         detail = (stderr or b"").decode("utf-8", "replace").strip()
         return (
             f"ffmpeg exited with code {self._proc.returncode}"

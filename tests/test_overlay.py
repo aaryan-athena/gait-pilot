@@ -257,17 +257,37 @@ class _PosixLikeStdin:
         self.closed = True
 
 
-class _PosixLikeProcess:
-    """``Popen`` with the POSIX ``_communicate`` stdin handling.
+class _PosixLikePipe:
+    """A readable pipe that can only be drained once, as a real one can."""
 
-    Mirrors CPython's POSIX branch exactly: flush stdin, tolerating only
-    ``BrokenPipeError``, then close it.
+    def __init__(self, payload=b""):
+        self._payload = payload
+        self.closed = False
+
+    def read(self):
+        if self.closed:
+            raise ValueError("read of closed file")
+        payload, self._payload = self._payload, b""
+        return payload
+
+    def close(self):
+        self.closed = True
+
+
+class _PosixLikeProcess:
+    """``Popen`` with POSIX pipe semantics, including ``_communicate``'s order.
+
+    ``communicate()`` mirrors CPython's POSIX branch exactly: flush stdin,
+    tolerating only ``BrokenPipeError``, then close it. It is present so that
+    any future use of it is held to the same standard, even though the writer
+    now avoids it.
     """
 
     def __init__(self, returncode=0, stderr=b"", broken=False):
         self.stdin = _PosixLikeStdin(broken=broken)
+        self.stderr = _PosixLikePipe(stderr)
         self.returncode = returncode
-        self._stderr = stderr
+        self.waited = 0
 
     def communicate(self, timeout=None):
         try:
@@ -275,7 +295,11 @@ class _PosixLikeProcess:
         except BrokenPipeError:
             pass
         self.stdin.close()
-        return None, self._stderr
+        return None, self.stderr.read()
+
+    def wait(self, timeout=None):
+        self.waited += 1
+        return self.returncode
 
 
 def _writer_with(process):
@@ -302,8 +326,33 @@ def test_close_does_not_flush_an_already_closed_pipe():
     result = writer.close()  # must not raise ValueError
 
     assert result.codec == "h264"
-    assert process.stdin.closed, "communicate() should have closed the pipe"
+    assert process.stdin.closed, "ffmpeg needs EOF to finalise the file"
     assert process.stdin.written > 0
+    assert process.waited == 1, "the process must be reaped, not left a zombie"
+
+
+def test_close_is_safe_to_call_twice():
+    """The render loop closes in a ``finally``, so a failed write closes twice.
+
+    Any implementation that re-touches stdin on the second call reintroduces the
+    Linux-only crash by a different route.
+    """
+    process = _PosixLikeProcess()
+    writer = _writer_with(process)
+    writer.write(np.zeros((4, 4, 3), np.uint8))
+
+    writer.close()
+    writer.close()  # must not raise, and must not read a drained pipe again
+
+
+def test_close_drains_stderr_before_reaping():
+    """Waiting before draining would deadlock on a full stderr pipe."""
+    process = _PosixLikeProcess(stderr=b"some ffmpeg chatter")
+    writer = _writer_with(process)
+
+    writer.close()
+    assert process.stderr.closed
+    assert process.waited == 1
 
 
 def test_nonzero_exit_reports_what_ffmpeg_said():
