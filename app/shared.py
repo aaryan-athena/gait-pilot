@@ -27,7 +27,17 @@ METRIC_DISPLAY: dict[str, tuple[str, str, str]] = {
     "cadence_spm": ("Cadence", "steps/min", "{:.0f}"),
     "double_support_pct": ("Double support", "% of cycle", "{:.1f}"),
     "trunk_ap_sway_norm": ("Trunk lean excursion", "x leg length", "{:.3f}"),
+    # Coronal-only. A side-on recording cannot see either: one leg hides the
+    # other, and side-to-side trunk motion is projected away.
+    "step_width_norm": ("Step width", "x leg length", "{:.3f}"),
+    "trunk_lateral_sway_norm": ("Lateral trunk sway", "x leg length", "{:.3f}"),
 }
+
+#: Metrics only a towards-camera recording produces. Hidden on a side-on
+#: session rather than shown as unmeasurable: a permanent "not measurable"
+#: card on every ordinary recording trains people to ignore that state, which
+#: is exactly the signal that has to keep working.
+CORONAL_ONLY_METRICS = ("step_width_norm", "trunk_lateral_sway_norm")
 
 VIDEO_TYPES = ["mp4", "mov", "avi", "mkv", "webm"]
 
@@ -81,7 +91,7 @@ def render_flags(flags) -> None:
         (st.error if flag.severity == "high" else st.warning)(body)
 
 
-def render_metrics(metrics) -> None:
+def render_metrics(metrics, *, coronal: bool = False) -> None:
     """Metric cards.
 
     A metric that could not be measured says so and gives the reason; one that
@@ -89,8 +99,12 @@ def render_metrics(metrics) -> None:
     relegated to a footnote, because in a screening tool an unqualified number
     reads as a normal result.
     """
+    keys = [
+        key for key in CORE_METRICS
+        if coronal or key not in CORONAL_ONLY_METRICS
+    ]
     columns = st.columns(3)
-    for index, key in enumerate(CORE_METRICS):
+    for index, key in enumerate(keys):
         label, unit, fmt = METRIC_DISPLAY[key]
         value = metrics.value(key)
         with columns[index % 3]:

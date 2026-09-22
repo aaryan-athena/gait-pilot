@@ -31,6 +31,8 @@ from .pose import landmarker
 from .pose.to_pixels import subject_pixel_height, to_pixels
 from .signal import filters, resample
 from .quality import feasibility
+from .quality import view as view_module
+from .quality.view import ViewClassification
 from .quality.diagnostics import RecordingReport, diagnose
 from .quality.score import score_session
 from .storage.artifacts import SessionArtifacts
@@ -54,6 +56,7 @@ class Extraction:
     calibration_check: CalibrationCheck
     gap_summary: dict[str, int]
     subject_px_height: float
+    view: Optional[ViewClassification] = None
 
     @property
     def warnings(self) -> list[str]:
@@ -112,7 +115,12 @@ def extract_session(
     series = filters.smooth_series(series, cfg)
     segments = resample.analysis_segments(series, cfg)
 
-    speed = feasibility.assess_speed(series, motion, cfg)
+    # Classified here rather than in the feature stage because two ingestion
+    # decisions already depend on it: whether "no forward travel" means a
+    # treadmill or a walk straight at the lens, and whether the sagittal
+    # pipeline should be run at all.
+    view = view_module.classify_view(series, cfg)
+    speed = feasibility.assess_speed(series, motion, cfg, view=view)
     check = calibration_verify.check(calibration, series)
 
     return Extraction(
@@ -126,6 +134,7 @@ def extract_session(
         calibration_check=check,
         gap_summary=gap_summary,
         subject_px_height=subject_pixel_height(series),
+        view=view,
     )
 
 
@@ -193,13 +202,17 @@ def analyse_video(
         progress=progress, check_camera_motion=check_camera_motion,
     )
     analysis = analyse(extraction, cfg)
+    coronal = analysis.view is not None and analysis.view.kind == view_module.CORONAL
     quality = score_session(
         extraction.series, extraction.raw, cfg,
-        cycles=analysis.cycles, declared_device=declared_device,
+        cycles=None if coronal else analysis.cycles,
+        n_passes=analysis.metrics.n_passes if coronal else None,
+        declared_device=declared_device,
     )
     flags = evaluate_flags(
         analysis.metrics, quality,
         history if history is not None else pd.DataFrame(), cfg,
+        view_kind=analysis.view.kind if analysis.view else None,
     )
     # Diagnostics run last: they describe the *recording*, and the most useful
     # of them (how many strides survived) is only known once segmentation has
@@ -251,6 +264,7 @@ def persist_session(
         "cycle_summary": result.analysis.cycle_summary,
         "range_of_motion": result.analysis.range_of_motion,
         "camera_side": result.analysis.camera_side,
+        "view_kind": result.analysis.view.kind if result.analysis.view else None,
         "direction_method": result.analysis.direction_method,
         "event_agreement_ms": result.analysis.event_agreement_ms,
         "notes": result.all_notes,
@@ -283,6 +297,7 @@ def persist_session(
         video_width=info.width,
         video_height=info.height,
         camera_side=result.analysis.camera_side,
+        view_kind=result.analysis.view.kind if result.analysis.view else None,
         assistive_device=result.assistive_device,
         speed_feasibility={
             "feasible": speed.feasible,

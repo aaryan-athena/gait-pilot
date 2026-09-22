@@ -14,19 +14,32 @@ Bump MINOR for changes that alter output values; bump PATCH for changes that
 cannot (logging, reporting, docstrings).
 """
 
-ALGO_VERSION = "0.2.0"
+ALGO_VERSION = "0.3.0"
 
 # Human-readable note on what defines this version's measurement, surfaced in
 # reports so a caregiver can see when the yardstick changed.
 ALGO_NOTES = (
     "Heel strike from the Zeni coordinate rule; toe-off from the end of "
     "measured ground contact; sub-frame refinement throughout; zero-phase "
-    "4th-order Butterworth @ 6 Hz; sagittal single-view."
+    "4th-order Butterworth @ 6 Hz. Sagittal single-view, with a separate and "
+    "much smaller measurement for towards-camera recordings."
 )
 
 #: What changed, and why a stored session from an earlier version is not
 #: comparable to one from this version without reprocessing.
 ALGO_CHANGELOG = {
+    "0.3.0": (
+        "Recordings filmed towards the camera are now identified and measured "
+        "separately, instead of being run through the sagittal pipeline as if "
+        "they were side-on. That path produced numbers -- a step-length "
+        "asymmetry and a cadence off by a factor of two on the pilot clip -- "
+        "from a signal that was mostly projection artefact. Such a session now "
+        "reports step width and lateral trunk sway, which a side view cannot "
+        "measure at all, and refuses the six metrics that need a side view. "
+        "Sagittal sessions are unaffected and their values are unchanged; the "
+        "version is bumped because the stored schema and the set of reported "
+        "metrics both changed. Sessions are never pooled across camera angles."
+    ),
     "0.2.0": (
         "Toe-off is now measured as the end of the foot's ground contact "
         "rather than inferred from the toe's anterior minimum. The old rule "

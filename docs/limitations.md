@@ -114,17 +114,25 @@ Protocol fix, not an algorithm fix: record **one pass in each direction**, so ea
 limb is the near limb once, and compare near-limb measurements. Sessions store
 `camera_side` per pass to support this.
 
-## 7. No frontal view means no lateral trunk sway
+## 7. Lateral trunk sway needs a towards-camera recording
 
-Lateral (side-to-side) trunk sway needs a frontal camera. This deployment has none,
-so the metric is **anterior-posterior trunk lean from the sagittal view**
-(`features.trunk_sway_axis: sagittal_ap`), stored as `trunk_ap_sway_norm`. It is a
-substitute, not the same measurement, and should not be compared against
-published lateral-sway norms.
+Lateral (side-to-side) trunk sway cannot be seen from the side: it happens
+along the axis a sagittal camera projects away. The default deployment is
+sagittal, so the sway metric on a normal session is **anterior-posterior trunk
+lean** (`features.trunk_sway_axis: sagittal_ap`), stored as
+`trunk_ap_sway_norm`. It is a substitute, not the same measurement, and should
+not be compared against published lateral-sway norms.
 
-Two unsynchronised video files also cannot be fused per gait cycle — there is no
-common clock. If a frontal camera is added later, it must be treated as an
-independent pass reporting session-level amplitude only.
+**Partly addressed in ALGO_VERSION 0.2.0.** A clip filmed towards the camera is
+now recognised and measured on its own terms, and real lateral sway
+(`trunk_lateral_sway_norm`) is one of the two things it yields — the other
+being step width, which a side view also cannot see. See item 18 for what such
+a recording gives up in exchange, which is most of the rest of the measurement.
+
+Two unsynchronised video files still cannot be fused per gait cycle — there is
+no common clock. A towards-camera recording is therefore treated as a separate
+session measuring different quantities, never as a second channel merged into
+a sagittal one.
 
 ## 8. Assistive devices cannot be detected from pose alone
 
@@ -309,3 +317,76 @@ Two consequences to keep in mind when using it to judge a recording:
 MediaPipe's `z` is a depth estimate relative to the hip midpoint in units that are
 neither metric nor reliable. It is archived for completeness and never computed
 from.
+
+## 18. A towards-camera recording measures something else entirely
+
+Everything in the sagittal pipeline assumes the camera stands side-on to the
+walk, so the direction of travel lies in the image plane. A clip filmed towards
+the camera — the person walking at the lens and away again — breaks that
+assumption completely, and the failure is quiet rather than loud.
+
+**The danger is not that it crashes.** It does not. The old code ran happily on
+the pilot coronal clip and reported a step-length asymmetry of 7.8% and a
+cadence of 44 steps/min, at a quality score of 0.93 with no low-confidence
+mark. The true cadence is about 80. Both numbers came from peaks in a signal
+that was mostly projection artefact. In a screening tool, a confident wrong
+number is worse than a missing one, so the camera angle is now identified
+before any sagittal metric is computed.
+
+**What is refused.** On a coronal clip, gait speed, step length, step-length
+asymmetry, step-time asymmetry, double support and stride-time variability are
+all reported as unavailable with a reason. Heel strike and toe-off are not
+detected at all: the Zeni rule reads anterior position, which is precisely the
+axis that has been projected away.
+
+**What is measured instead.** Step width (`step_width_norm`) and lateral trunk
+sway (`trunk_lateral_sway_norm`), neither of which a side view can produce —
+one leg hides the other, and side-to-side motion is projected away. Cadence and
+mean stride time are also recovered, from the vertical bob of each ankle
+relative to the pelvis, and accepted only when the two legs independently agree
+on the period. On the pilot clip that gave 80 steps/min across four passes with
+the legs agreeing to within 0.02 s.
+
+**Stride-time variability is deliberately withheld**, not merely absent. The
+period is stable enough to average over a pass, but individual heel strikes
+cannot be located precisely enough in this view to time one stride against the
+next, and a CV built from imprecise event times measures the detector rather
+than the person — while being read as the fall-risk signal that stride-time
+variability is.
+
+**How the view is detected.** By comparing how far the subject travels *across*
+the image against how much their apparent *size* changes. A person crossing the
+frame stays at a near-constant distance; a person walking at the camera does
+the opposite. On the pilot clips the ratio separates the two cases by roughly a
+factor of forty (coronal 3.4, sagittal 0.016–0.085), so both thresholds sit far
+from anything observed.
+
+The earlier shoulder-separation check is kept, but is not the gate. It compares
+observed shoulder width against the width implied by trunk height, which needs
+an assumed ratio between the two — and on the pilot footage that assumption
+cost it most of its range: a subject walking straight at the camera measured
+51° off side-on where the truth is nearer 90°, simply because their build did
+not match the constant. Under-reading in the one case that matters makes it
+unfit as a gate, though it remains useful for reporting foreshortening on
+genuinely oblique clips.
+
+**Not validated: diagonal walks.** The pilot set contains side-on clips and one
+towards-camera clip, and nothing in between. Clips between the two thresholds
+are classified `oblique` and sent down the sagittal path with the existing
+foreshortening warning, which is the conservative choice — but where exactly a
+diagonal walk stops being measurable has not been established against real
+footage.
+
+**Sessions filmed at different angles are never mixed.** They measure different
+things by different means, so pooling them into one baseline or one trend line
+would produce a step change that is the camera moving rather than the person —
+the same failure mode as mixing algorithm versions (item 11), and just as
+indistinguishable from real decline after the fact. `view_kind` is stored on
+every session, baselines are restricted to matching sessions, and the trends
+page shows one angle at a time. Sessions stored before `view_kind` existed are
+treated as sagittal, which is what they were.
+
+**The right fix is still to move the camera.** A coronal recording is reported
+as a blocker-level recording problem, because the two measures it adds do not
+come close to replacing the six it costs.
+

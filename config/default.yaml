@@ -102,6 +102,42 @@ segmentation:
   # A direction reversal (turn) ends a pass.
   turn_min_still_frames: 5
 
+view:
+  # Which plane the walk was recorded in. Everything downstream of segmentation
+  # assumes the camera is side-on; a towards-camera clip breaks that assumption
+  # without breaking the code, which is the dangerous case (see quality/view.py).
+  #
+  # The test compares how far the subject travels across the image against how
+  # much their apparent size changes. Pilot footage: 0.016-0.085 for side-on
+  # clips, 3.4 for the towards-camera clip, so both thresholds sit a factor of
+  # ~6 away from anything observed.
+  coronal_depth_ratio: 0.5
+  sagittal_depth_ratio: 0.15
+  # Below this much apparent-size change the subject is not moving in depth at
+  # all, so the ratio has no meaning and is not computed. Walking in place
+  # lands here.
+  min_size_change: 0.5
+
+coronal:
+  # Measurement from a towards-camera clip. Only reached when quality/view.py
+  # classifies the recording as coronal; see features/coronal.py for what such
+  # a view can and cannot support.
+  #
+  # Direction of travel is read from whether the subject is growing or
+  # shrinking in the frame. Smoothed over longer than a stride, or the scale
+  # wobble from knee flexion reads as a change of direction.
+  direction_smooth_s: 1.5
+  # A turn is not gait. Runs shorter than this are turns or stumbles, and the
+  # edges of the ones that survive are the subject decelerating into a turn and
+  # accelerating out of it -- trimmed for the same reason the sagittal path
+  # drops strides at pass edges.
+  min_pass_s: 2.0
+  pass_edge_trim_s: 0.7
+  # Cadence is taken from each ankle independently and only accepted when the
+  # two legs agree. They are one gait cycle, so a larger gap than this means
+  # the estimate locked onto a harmonic on one side and is wrong, not noisy.
+  max_leg_period_disagreement: 0.15
+
 speed:
   # Gait speed is only reported when the subject genuinely translates across
   # a static frame. Treadmill / walking-in-place / camera-tracked footage
@@ -220,6 +256,13 @@ flagging:
       cadence_spm: 4.0
       double_support_pct: 2.0
       trunk_ap_sway_norm: 0.01
+      # ILLUSTRATIVE, and less grounded than the rest: no repeatability study
+      # exists for these two, because the tool has only just started measuring
+      # them. Across the four passes of the one pilot coronal clip, step width
+      # varied by 0.02 leg lengths and lateral sway by 0.002, so these sit just
+      # above that within-session spread. Re-measure before relying on them.
+      step_width_norm: 0.025
+      trunk_lateral_sway_norm: 0.004
     # Only deterioration is a flag; improvement is not.
     direction_aware: true
     # Bias toward sensitivity: a single deviating session flags. A deviation
@@ -252,3 +295,5 @@ reporting:
     - cadence_spm
     - double_support_pct
     - trunk_ap_sway_norm
+    - step_width_norm
+    - trunk_lateral_sway_norm

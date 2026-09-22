@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from ..config import Config
+from ..quality import view as view_module
+from ..quality.view import ViewClassification
 from ..segmentation import cycles as cycles_module
 from ..segmentation import direction as direction_module
 from ..segmentation.events import (EventSet, detect_events,
@@ -20,6 +22,7 @@ from ..types import (AngleCurves, GaitCycle, GaitEvent, SessionMetrics,
                      WalkPass)
 from . import angles as angles_module
 from . import asymmetry as asymmetry_module
+from . import coronal as coronal_module
 from . import spatiotemporal, trunk as trunk_module
 from . import variability as variability_module
 
@@ -37,6 +40,7 @@ class SessionAnalysis:
     range_of_motion: dict[str, float] = field(default_factory=dict)
     direction_method: str = ""
     camera_side: str | None = None
+    view: "ViewClassification | None" = None
     event_agreement_ms: float | None = None
     notes: list[str] = field(default_factory=list)
 
@@ -45,11 +49,63 @@ class SessionAnalysis:
         return [c for c in self.cycles if c.valid]
 
 
+def _analyse_coronal(extraction, cfg: Config, view: ViewClassification,
+                     notes: list[str]) -> SessionAnalysis:
+    """Measure a towards-camera recording, and refuse what it cannot support.
+
+    Kept as its own path rather than as a branch inside the sagittal one. The
+    two share almost nothing: there is no anterior axis to segment on, no heel
+    strike, and no gait cycle in the sense the rest of the pipeline means. What
+    they do share is the contract that an unavailable metric is reported as
+    unavailable, with a reason, and never filled in.
+    """
+    metrics = SessionMetrics()
+    result = coronal_module.analyse_coronal(extraction.series, cfg)
+
+    for metric, reason in coronal_module.SAGITTAL_ONLY_METRICS.items():
+        metrics.mark_unavailable(metric, reason)
+
+    metrics.step_width_norm = result.step_width_norm
+    metrics.trunk_lateral_sway_norm = result.trunk_lateral_sway_norm
+    metrics.cadence_spm = result.cadence_spm
+    metrics.stride_time_mean_s = result.stride_time_mean_s
+    metrics.n_passes = result.n_passes
+    if result.cadence_spm is None:
+        metrics.mark_unavailable(
+            "cadence_spm",
+            "the walk could not be timed reliably from this recording",
+        )
+
+    notes = notes + [
+        "this recording was filmed towards the camera rather than side-on. "
+        "Walking speed, step length, step-length asymmetry and time on both "
+        "feet cannot be measured from this angle and are not reported. Step "
+        "width and side-to-side body sway, which a side-on recording cannot "
+        "see at all, are reported instead.",
+        "these measurements are not comparable with those from side-on "
+        "recordings and are kept separate when tracking change over time.",
+        *result.notes,
+    ]
+
+    return SessionAnalysis(
+        metrics=metrics, angles=AngleCurves(percent=np.linspace(0, 100, 101)),
+        direction_method="coronal", view=view, notes=notes,
+    )
+
+
 def analyse(extraction, cfg: Config) -> SessionAnalysis:
     """Run segmentation and feature extraction over a completed extraction."""
     series = extraction.series
     metrics = SessionMetrics()
     notes: list[str] = []
+
+    # Which plane the walk was filmed in decides which pipeline can run at all.
+    # This has to come first: the sagittal path does not fail on a
+    # towards-camera clip, it succeeds on a signal that is mostly projection
+    # artefact and reports a confident step-length asymmetry from it.
+    view = extraction.view or view_module.classify_view(series, cfg)
+    if view.kind == view_module.CORONAL:
+        return _analyse_coronal(extraction, cfg, view, notes)
 
     sign, method, agreement = direction_module.anterior_sign(series)
     if method == "assumed":
@@ -75,7 +131,7 @@ def analyse(extraction, cfg: Config) -> SessionAnalysis:
             )
         return SessionAnalysis(
             metrics=metrics, angles=AngleCurves(percent=np.linspace(0, 100, 101)),
-            direction_method=method, notes=notes + [
+            direction_method=method, view=view, notes=notes + [
                 "no walking pass could be segmented; the subject may not be fully "
                 "visible, or the walk may be too short"
             ],
@@ -131,6 +187,7 @@ def analyse(extraction, cfg: Config) -> SessionAnalysis:
         cycle_summary=summary,
         range_of_motion=angles_module.range_of_motion(curves),
         direction_method=method,
+        view=view,
         camera_side=camera_side,
         event_agreement_ms=float(np.mean(agreements)) if agreements else None,
         notes=notes,

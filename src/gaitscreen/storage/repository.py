@@ -29,6 +29,8 @@ _METRIC_COLUMNS = (
     "cadence_spm",
     "double_support_pct",
     "trunk_ap_sway_norm",
+    "step_width_norm",
+    "trunk_lateral_sway_norm",
     "stride_time_mean_s",
     "stride_time_sd_s",
 )
@@ -59,6 +61,7 @@ class SessionRecord:
     video_width: Optional[int] = None
     video_height: Optional[int] = None
     camera_side: Optional[str] = None
+    view_kind: Optional[str] = None
     assistive_device: Optional[str] = None
     speed_feasibility: Optional[dict] = None
     recording_diagnostics: Optional[list] = None
@@ -160,6 +163,7 @@ class SessionRepository:
             "video_width": record.video_width,
             "video_height": record.video_height,
             "camera_side": record.camera_side,
+            "view_kind": record.view_kind,
             "assistive_device": record.assistive_device,
             "n_strides_total": metrics.n_strides_total,
             "n_strides_valid": metrics.n_strides_valid,

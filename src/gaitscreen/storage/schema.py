@@ -24,7 +24,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -76,6 +76,11 @@ CREATE TABLE IF NOT EXISTS sessions (
     video_width    INTEGER,
     video_height   INTEGER,
     camera_side    TEXT,                     -- body side facing the camera
+    -- Which plane the walk was filmed in: sagittal (side-on, the normal case),
+    -- coronal (towards camera), oblique or indeterminate. Sessions filmed in
+    -- different planes measure different things and must never share a
+    -- baseline, so this is stored per session rather than assumed.
+    view_kind      TEXT,
     assistive_device TEXT,                   -- operator-entered, authoritative
 
     -- Core metrics (all nullable; see metrics_unavailable).
@@ -86,6 +91,10 @@ CREATE TABLE IF NOT EXISTS sessions (
     cadence_spm               REAL,
     double_support_pct        REAL,
     trunk_ap_sway_norm        REAL,
+
+    -- Coronal-only; null on every side-on session.
+    step_width_norm           REAL,
+    trunk_lateral_sway_norm   REAL,
 
     stride_time_mean_s REAL,
     stride_time_sd_s   REAL,
@@ -165,10 +174,41 @@ def connect(db_path: str | Path, *, create: bool = True) -> sqlite3.Connection:
     return conn
 
 
+#: Columns added after the first release, as {table: {column: type}}. SQLite
+#: CREATE TABLE IF NOT EXISTS does nothing to a table that already exists, so a
+#: database created by an earlier version would silently keep the old columns
+#: and fail on insert. A longitudinal tool cannot ask people to start their
+#: history again over a schema change, so missing columns are added in place.
+_ADDED_COLUMNS = {
+    "sessions": {
+        "view_kind": "TEXT",
+        "step_width_norm": "REAL",
+        "trunk_lateral_sway_norm": "REAL",
+    },
+}
+
+
+def _add_missing_columns(conn: sqlite3.Connection) -> list[str]:
+    """Bring an existing database up to the current column set."""
+    added: list[str] = []
+    for table, columns in _ADDED_COLUMNS.items():
+        existing = {
+            row["name"] for row in conn.execute(f"PRAGMA table_info({table})")
+        }
+        if not existing:
+            continue  # table not created yet; the DDL will do it
+        for name, sql_type in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}")
+                added.append(f"{table}.{name}")
+    return added
+
+
 def initialise(conn: sqlite3.Connection) -> None:
     """Apply the DDL and record the schema version."""
     with conn:
         conn.executescript(_DDL)
+        _add_missing_columns(conn)
         conn.execute(
             "INSERT INTO schema_meta(key, value) VALUES('schema_version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",

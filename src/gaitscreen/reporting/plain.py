@@ -104,6 +104,33 @@ PLAIN: dict[str, dict] = {
                 "step, relative to their height. More rocking can accompany a "
                 "guarded or unsteady gait.",
     },
+    "step_width_norm": {
+        "name": "How wide they walk",
+        "unit": "x leg length",
+        "fmt": "{:.3f}",
+        "higher_is_better": False,
+        "what": "How far apart the feet are placed, side to side, relative to "
+                "leg length. Widening the stance is one of the first things "
+                "people do when they feel unsteady, because a wider base is "
+                "harder to topple.",
+        "known_bias": (
+            "Only available from a video filmed towards the person, and not "
+            "comparable with anything measured from a side-on video."
+        ),
+    },
+    "trunk_lateral_sway_norm": {
+        "name": "Side-to-side body sway",
+        "unit": "",
+        "fmt": "{:.3f}",
+        "higher_is_better": False,
+        "what": "How much the upper body rocks from side to side over the hips "
+                "with each step, relative to their height. More rocking can "
+                "accompany weakness at the hip or a wary, unsteady gait.",
+        "known_bias": (
+            "Only available from a video filmed towards the person, and not "
+            "comparable with anything measured from a side-on video."
+        ),
+    },
 }
 
 #: Short, non-technical versions of the reasons a metric could not be measured.
@@ -128,6 +155,9 @@ UNMEASURED_PLAIN: list[tuple[str, str]] = [
     ("not enough", "Not enough clean steps in this video to work this out."),
     ("both feet", "The two feet could not be tracked separately well enough for "
                   "this measure."),
+    ("side-on to it", "This video was filmed towards the person rather than "
+                      "from the side, so this measure cannot be worked out "
+                      "from it. Filming from the side gives it."),
     ("two per side", "Too few steps on each side to compare left with right."),
 ]
 
@@ -176,7 +206,8 @@ def summarise(result, cfg: Config) -> PlainSummary:
     """Build the plain-language view of a completed session."""
     metrics = result.metrics
     statuses = _statuses_from_flags(result)
-    cards = [_card(key, metrics, statuses, cfg) for key in CORE_METRICS]
+    cards = [_card(key, metrics, statuses, cfg)
+             for key in _metrics_for_view(result)]
 
     n_measured = sum(1 for c in cards if c.measured)
     headline, sub, tone = _verdict(result, cards, n_measured)
@@ -190,6 +221,27 @@ def summarise(result, cfg: Config) -> PlainSummary:
         n_total=len(cards),
         walk_description=_describe_walk(result),
     )
+
+
+#: Metrics only a towards-camera recording can produce. They are left out of a
+#: side-on session's card list entirely rather than shown as unmeasured: a card
+#: reading "film from the front to get this" on every ordinary recording is
+#: advice nobody asked for, and it would dilute the unmeasured list, which is
+#: meant to be the things worth fixing about *this* recording.
+CORONAL_ONLY = ("step_width_norm", "trunk_lateral_sway_norm")
+
+
+def _metrics_for_view(result) -> tuple[str, ...]:
+    """The metrics worth showing for the way this video was filmed."""
+    view = getattr(getattr(result, "analysis", None), "view", None)
+    coronal = view is not None and view.kind == "coronal"
+    if coronal:
+        # The reverse case is not symmetrical. On a coronal recording the
+        # sagittal metrics are kept and shown as unmeasured, because the person
+        # was trying to record a normal session and needs to know why speed and
+        # step length are missing.
+        return CORE_METRICS
+    return tuple(m for m in CORE_METRICS if m not in CORONAL_ONLY)
 
 
 # --------------------------------------------------------------------------

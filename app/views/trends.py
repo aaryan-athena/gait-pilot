@@ -29,11 +29,56 @@ def render(cfg: Config) -> None:
             return
 
         _render_summary(repository, user_id)
+        history = _one_camera_angle(history)
         flagged = _flagged_dates(repository, history)
         _render_trends(cfg, history, flagged)
         _render_tables(repository, history)
     finally:
         repository.close()
+
+
+#: How each stored view kind is described to someone reading their own trends.
+VIEW_LABELS = {
+    "sagittal": "Filmed from the side",
+    "oblique": "Filmed from the side",
+    "indeterminate": "Filmed from the side",
+    "coronal": "Filmed towards the person",
+}
+
+
+def _one_camera_angle(history: pd.DataFrame) -> pd.DataFrame:
+    """Never draw two camera angles on the same trend line.
+
+    A side-on and a towards-camera recording of the same walk on the same day
+    give different cadences, because they measure it by different means. Drawn
+    together they make a step in the chart that looks exactly like the thing
+    this page exists to detect. The baseline already refuses to mix them; the
+    chart must not either.
+    """
+    if "view_kind" not in history or history.empty:
+        return history
+
+    # Sessions stored before the view was recorded were all analysed by the
+    # sagittal path, because it was the only one.
+    kinds = history["view_kind"].fillna("sagittal").map(
+        lambda k: "coronal" if k == "coronal" else "sagittal"
+    )
+    present = list(dict.fromkeys(kinds))
+    if len(present) < 2:
+        return history
+
+    st.info(
+        "This person has sessions filmed from two different camera angles. "
+        "They measure walking in different ways and their numbers are not "
+        "comparable, so only one angle is shown at a time -- plotting both "
+        "together would show a step change that is the camera moving, not the "
+        "person."
+    )
+    chosen = st.radio(
+        "Camera angle", present, horizontal=True,
+        format_func=lambda k: f"{VIEW_LABELS[k]} ({int((kinds == k).sum())} sessions)",
+    )
+    return history[kinds == chosen]
 
 
 def _render_summary(repository, user_id: str) -> None:

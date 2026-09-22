@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from gaitscreen.flagging import absolute, baseline as baseline_module, trend
+from gaitscreen.flagging import engine
 from gaitscreen.flagging.engine import evaluate
 from gaitscreen.types import QualityReport, SessionMetrics
 
@@ -255,3 +256,59 @@ def test_every_flag_has_a_plain_language_message(cfg):
         assert len(flag.message) > 40
         assert flag.message[0].isupper() or flag.message.split()[0].islower()
         assert flag.detail
+
+
+# --------------------------------------------------------------------------
+# camera angle must not leak into a person's trend
+# --------------------------------------------------------------------------
+def _mixed_view_history(sagittal_values, coronal_values, metric="cadence_spm"):
+    values = list(sagittal_values) + list(coronal_values)
+    kinds = ["sagittal"] * len(sagittal_values) + ["coronal"] * len(coronal_values)
+    return pd.DataFrame({
+        "session_date": pd.date_range("2026-01-01", periods=len(values), freq="14D"),
+        metric: values,
+        "view_kind": kinds,
+        "low_confidence": [0] * len(values),
+    })
+
+
+def test_a_baseline_ignores_sessions_filmed_from_a_different_angle(cfg):
+    """A change of camera angle must not read as a change in the person.
+
+    Side-on and towards-camera recordings measure cadence by different means,
+    so their values step against each other. Pooling them would widen the
+    spread until nothing could ever flag, or -- worse -- centre the baseline
+    between two clusters so that every session deviates from it.
+    """
+    history = _mixed_view_history([100, 101, 99, 102, 100], [78, 80, 79, 81, 80])
+
+    coronal = engine._same_view(history, "coronal")
+    assert set(coronal["cadence_spm"]) == {78, 80, 79, 81, 80}
+
+    sagittal = engine._same_view(history, "sagittal")
+    assert set(sagittal["cadence_spm"]) == {100, 101, 99, 102, 100}
+
+
+def test_sessions_stored_before_view_was_recorded_count_as_side_on(cfg):
+    """Existing histories must survive the upgrade.
+
+    Every session recorded before this existed was analysed by the sagittal
+    path -- it was the only path -- so treating a missing value as sagittal
+    keeps those baselines intact. Discarding them instead would reset every
+    pilot user's history to nothing, which is the same harm as a trend break.
+    """
+    history = _mixed_view_history([100, 101, 99, 102, 100], [])
+    history["view_kind"] = None
+
+    kept = engine._same_view(history, "sagittal")
+    assert len(kept) == 5
+    assert engine._same_view(history, "coronal").empty
+
+
+def test_a_coronal_session_does_not_inherit_a_side_on_baseline(cfg):
+    """End to end: the baseline must refuse rather than borrow."""
+    history = _mixed_view_history([100, 101, 99, 102, 100], [])
+    metrics = SessionMetrics(cadence_spm=80.0)
+
+    result = engine.evaluate(metrics, GOOD_QUALITY, history, cfg, view_kind="coronal")
+    assert not result.baselines["cadence_spm"].available

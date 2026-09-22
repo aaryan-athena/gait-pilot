@@ -349,3 +349,140 @@ def _to_normalised(xy_up: np.ndarray, width: int, height: int) -> np.ndarray:
     out[..., 0] = xy_up[..., 0] / width
     out[..., 1] = (height - xy_up[..., 1]) / height
     return out
+
+
+def synthetic_coronal_walk(
+    *,
+    fps: float = 60.0,
+    n_strides: int = 10,
+    stride_time_s: float = 1.20,
+    step_width_ratio: float = 0.18,
+    sway_ratio: float = 0.030,
+    leg_length_m: float = 0.85,
+    start_depth_m: float = 9.0,
+    end_depth_m: float = 2.5,
+    focal_px: float = 900.0,
+    width: int = 720,
+    height: int = 1280,
+    noise_px: float = 0.0,
+    seed: int = 11,
+    turn_around: bool = False,
+) -> tuple[RawLandmarks, GroundTruth]:
+    """A walk straight towards the camera, projected through a pinhole lens.
+
+    The sagittal generator cannot be reused or adapted for this. It places both
+    legs at the same horizontal position, because from the side one leg hides
+    the other, so it has no lateral dimension at all -- and step width and
+    lateral sway are *entirely* lateral. Testing the coronal path against it
+    would only confirm that zero comes back as zero.
+
+    So this builds the walk in three dimensions and projects it, which also
+    makes the ground truth exact rather than approximate. Under a pinhole
+    projection a lateral distance ``W`` at depth ``Z`` images as ``f*W/Z``, and
+    the leg length ``L`` used to normalise it images as ``f*L/Z``. The depth and
+    the focal length cancel in the ratio, so the recovered step width must come
+    back as ``W/L`` -- the prescribed ``step_width_ratio`` -- from every frame
+    of the walk regardless of how far away the subject is. A generator that got
+    the projection wrong would show up immediately as a distance-dependent
+    answer.
+
+    ``turn_around`` appends the return walk, so the pass splitter has a real
+    turn to find rather than an assumed one.
+    """
+    rng = np.random.default_rng(seed)
+    left_strides = _draw_strides(rng, n_strides, stride_time_s, 0.0)
+    right_strides = _draw_strides(rng, n_strides, stride_time_s, 0.0)
+    left_hs = np.concatenate([[0.0], np.cumsum(left_strides)])
+    right_hs = 0.5 * stride_time_s + np.concatenate([[0.0], np.cumsum(right_strides)])
+
+    duration = min(left_hs[-1], right_hs[-1])
+    n_frames = int(np.floor(duration * fps)) + 1
+    t = np.arange(n_frames) / fps
+    phase = {"left": _phase_from_events(t, left_hs),
+             "right": _phase_from_events(t, right_hs)}
+
+    # Depth: a steady approach, then the same walk back out if asked for.
+    fraction = t / t[-1]
+    if turn_around:
+        # Triangle wave: in to end_depth by halfway, back out to start.
+        fraction = 1.0 - np.abs(2.0 * fraction - 1.0)
+    depth = start_depth_m + (end_depth_m - start_depth_m) * fraction
+
+    leg = leg_length_m
+    trunk = 0.9 * leg
+    half_width = 0.5 * step_width_ratio * leg
+
+    xyz = np.zeros((n_frames, N_LANDMARKS, 3))  # lateral, vertical, depth
+
+    def place(index: PL, lateral, vertical) -> None:
+        xyz[:, int(index), 0] = lateral
+        xyz[:, int(index), 1] = vertical
+        xyz[:, int(index), 2] = depth
+
+    # The ankle sits a little above the ground, the foot having thickness, so
+    # the hips go a foot-height higher than the leg length. The pipeline
+    # normalises by the hip-to-ankle distance it can actually see, and the
+    # prescribed ratios are only ground truth if that distance is ``leg``.
+    ankle_rest = 0.06 * leg
+    hip_v = np.full(n_frames, leg + ankle_rest)
+    place(PL.LEFT_HIP, -0.5 * half_width, hip_v)
+    place(PL.RIGHT_HIP, +0.5 * half_width, hip_v)
+
+    # Trunk rocking side to side over the hips, once per stride. The pipeline
+    # reports the standard deviation of this, which for a sinusoid of amplitude
+    # A is A/sqrt(2) -- so the ground truth is not simply ``sway_ratio``.
+    sway = sway_ratio * leg * np.cos(2 * np.pi * phase["left"])
+    place(PL.LEFT_SHOULDER, sway - 0.2 * leg, hip_v + trunk)
+    place(PL.RIGHT_SHOULDER, sway + 0.2 * leg, hip_v + trunk)
+    place(PL.NOSE, sway, hip_v + trunk + 0.25 * leg)
+
+    for side, lateral_sign in (("left", -1.0), ("right", +1.0)):
+        p = phase[side]
+        lift = _swing_lift(p) * 0.10 * leg
+        ankle_v = ankle_rest + lift
+        ankle_l = np.full(n_frames, lateral_sign * half_width)
+        place(_pl(side, "ANKLE"), ankle_l, ankle_v)
+        place(_pl(side, "HEEL"), ankle_l, ankle_v)
+        place(_pl(side, "FOOT_INDEX"), ankle_l, ankle_v * 0.7)
+        place(_pl(side, "KNEE"), ankle_l, 0.5 * (hip_v + ankle_v))
+        place(_pl(side, "WRIST"), lateral_sign * 0.22 * leg, hip_v + 0.25 * trunk)
+        place(_pl(side, "ELBOW"), lateral_sign * 0.22 * leg, hip_v + 0.5 * trunk)
+
+    for index in range(N_LANDMARKS):
+        if not xyz[:, index, :2].any():
+            xyz[:, index, :] = xyz[:, int(PL.NOSE), :]
+
+    # Pinhole projection, origin at the frame centre, y measured upwards.
+    xy = np.empty((n_frames, N_LANDMARKS, 2))
+    xy[..., 0] = 0.5 * width + focal_px * xyz[..., 0] / xyz[..., 2]
+    xy[..., 1] = 0.15 * height + focal_px * xyz[..., 1] / xyz[..., 2]
+    if noise_px:
+        xy += rng.normal(0.0, noise_px, size=xy.shape)
+
+    info = VideoInfo(path=Path("synthetic_coronal.mp4"), width=width,
+                     height=height, fps=fps, n_frames=n_frames)
+    raw = RawLandmarks(
+        t=t, xy=_to_normalised(xy, width, height),
+        z=np.zeros((n_frames, N_LANDMARKS)),
+        visibility=np.full((n_frames, N_LANDMARKS), 0.95),
+        detected=np.ones(n_frames, dtype=bool), video=info,
+    )
+    truth = GroundTruth(
+        fps=fps,
+        stride_times_s={"left": left_strides.tolist(),
+                        "right": right_strides.tolist()},
+        heel_strikes_s={"left": [v for v in left_hs if v <= t[-1]],
+                        "right": [v for v in right_hs if 0 <= v <= t[-1]]},
+        speed_px_s=0.0,
+        step_length_px=0.0,
+        leg_length_px=focal_px * leg / float(np.median(depth)),
+        scale_m_per_px=None,
+        extras={
+            "view": "coronal",
+            "step_width_norm": step_width_ratio,
+            # Standard deviation of a cosine of amplitude A is A/sqrt(2).
+            "trunk_lateral_sway_norm": sway_ratio / np.sqrt(2.0),
+            "turn_around": turn_around,
+        },
+    )
+    return raw, truth

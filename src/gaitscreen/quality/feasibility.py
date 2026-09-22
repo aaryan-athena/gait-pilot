@@ -22,10 +22,13 @@ from ..config import Config
 from ..io.video import CameraMotion
 from ..pose.schema import HIPS
 from ..types import PixelSeries, SpeedFeasibility
+from . import view as view_module
+from .view import ViewClassification
 
 
 def assess_speed(
-    series: PixelSeries, camera_motion: CameraMotion, cfg: Config
+    series: PixelSeries, camera_motion: CameraMotion, cfg: Config,
+    *, view: "ViewClassification | None" = None,
 ) -> SpeedFeasibility:
     """Decide whether image-space displacement reflects real forward travel."""
     width = series.video.width
@@ -42,14 +45,26 @@ def assess_speed(
     max_camera = float(cfg["speed.max_camera_motion_frac"])
 
     if translation_frac < min_translation:
-        reason = (
-            f"subject moves only {translation_frac:.0%} of the frame width across the "
-            f"whole recording (at least {min_translation:.0%} is required). This is "
-            "treadmill or in-place walking, or the camera is following the subject; "
-            "either way the recording contains no measurable forward travel, so "
-            "gait speed and step length in metres are not reported. Timing "
-            "metrics are unaffected."
-        )
+        # Someone walking straight at the camera also fails this test, having
+        # covered real ground the whole time. Saying they walked in place would
+        # send them to fix the wrong thing, so name what actually happened.
+        if view is not None and view.kind == view_module.CORONAL:
+            reason = (
+                "the subject walks towards and away from the camera rather than "
+                "across it, so their travel is along the camera's line of sight "
+                "where distance cannot be recovered from the image. Gait speed "
+                "and step length are not reported. Film from the side of the "
+                "walking path to measure them."
+            )
+        else:
+            reason = (
+                f"subject moves only {translation_frac:.0%} of the frame width "
+                f"across the whole recording (at least {min_translation:.0%} is "
+                "required). This is treadmill or in-place walking, or the camera "
+                "is following the subject; either way the recording contains no "
+                "measurable forward travel, so gait speed and step length in "
+                "metres are not reported. Timing metrics are unaffected."
+            )
         return SpeedFeasibility(
             feasible=False,
             subject_translation_px=translation_px,

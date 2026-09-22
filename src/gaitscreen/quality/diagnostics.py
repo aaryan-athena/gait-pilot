@@ -30,6 +30,7 @@ import numpy as np
 from ..config import Config
 from ..pose.schema import GAIT_CRITICAL, HIPS, PL, SHOULDERS, SIDE_LANDMARKS
 from ..pose.to_pixels import leg_length_px
+from . import view as view_module
 
 Severity = Literal["blocker", "major", "minor"]
 
@@ -99,6 +100,7 @@ def diagnose(extraction, analysis, cfg: Config) -> RecordingReport:
     }
 
     checks = (
+        _check_coronal_view,
         _check_subject_size,
         _check_framing,
         _check_camera_angle,
@@ -124,6 +126,50 @@ def diagnose(extraction, analysis, cfg: Config) -> RecordingReport:
 # --------------------------------------------------------------------------
 # individual checks
 # --------------------------------------------------------------------------
+
+def _check_coronal_view(extraction, analysis, series, raw, leg_px, cfg, out):
+    """The camera was facing the walk rather than standing side-on to it.
+
+    This is the one framing mistake that costs most of the measurement rather
+    than degrading it. The walking direction ends up pointing along the camera
+    axis, where the image cannot resolve it, so step length, gait speed and
+    everything built on heel strike and toe-off are gone -- not foreshortened,
+    gone. It is reported as a blocker for that reason, even though the clip
+    still yields step width and side-to-side sway, which a side-on recording
+    could not have given at all.
+
+    The classification is made in features/session.py, which needs it before it
+    can decide which pipeline to run; this check reports what was decided
+    rather than deciding it again.
+    """
+    view = getattr(analysis, "view", None)
+    if view is None:
+        return None
+    out.update(view.measurements)
+    if view.kind != view_module.CORONAL:
+        return None
+
+    return Diagnostic(
+        code="coronal_view",
+        severity="blocker",
+        title="Camera was facing the walk instead of side-on to it",
+        detail=(
+            "The person walks towards and away from the camera, so their "
+            "direction of travel points straight at the lens. Distances along "
+            "that direction cannot be recovered from the image, which rules "
+            "out walking speed, step length, step-length asymmetry and time on "
+            "both feet. Step width and side-to-side body sway were measured "
+            "instead -- a side-on recording cannot see either."
+        ),
+        fix=(
+            "Stand to one side of the walking path, level with its middle, and "
+            "film the person crossing the frame from one edge to the other. "
+            "Keep the whole body in shot for the full walk."
+        ),
+        measured=view.measurements,
+    )
+
+
 def _check_subject_size(extraction, analysis, series, raw, leg_px, cfg, out):
     """How many pixels tall the subject is, which caps all downstream precision.
 
@@ -474,6 +520,13 @@ def _check_camera_shake(extraction, analysis, series, raw, leg_px, cfg, out):
 
 def _check_walk_length(extraction, analysis, series, raw, leg_px, cfg, out):
     """Whether enough strides were captured, expressed as what to add."""
+    view = getattr(analysis, "view", None)
+    if view is not None and view.kind == view_module.CORONAL:
+        # No strides were segmented, because a coronal recording has no
+        # anterior axis to segment on. Reporting "not enough strides" here
+        # would send the operator off to record a longer walk when the fix is
+        # to move the camera -- which the coronal_view blocker already says.
+        return None
     summary = analysis.cycle_summary or {}
     n_valid = int(summary.get("n_valid", 0))
     out["strides_valid"] = n_valid

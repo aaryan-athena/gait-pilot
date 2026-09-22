@@ -10,6 +10,7 @@ import pytest
 
 from gaitscreen.features.session import analyse
 from gaitscreen.flagging.engine import evaluate
+from gaitscreen.reporting import plain as plain_module
 from gaitscreen.reporting.plain import PLAIN, summarise
 from gaitscreen.types import CORE_METRICS, Flag, QualityReport, SessionMetrics
 from fixtures.extraction import build_extraction
@@ -173,7 +174,7 @@ def test_measured_and_unmeasured_are_separable(cfg):
 
     summary = summarise(_FakeResult(metrics, _flags()), cfg)
     assert len(summary.measured_cards) == 2
-    assert len(summary.unmeasured_cards) == 4
+    assert len(summary.unmeasured_cards) == summary.n_total - 2
 
 
 # --------------------------------------------------------------------------
@@ -247,7 +248,10 @@ def test_summarises_a_real_pipeline_result(cfg):
 
     summary = summarise(result, cfg)
     assert summary.headline
-    assert summary.n_total == len(CORE_METRICS)
+    # The coronal-only measures are left out of a side-on session's cards; a
+    # card advising a different camera angle on every ordinary recording would
+    # bury the unmeasured items that are actually worth fixing.
+    assert summary.n_total == len(CORE_METRICS) - len(plain_module.CORONAL_ONLY)
     assert summary.measured_cards, "a clean synthetic walk should measure something"
     assert summary.walk_description and "step cycles" in summary.walk_description
     for card in summary.cards:

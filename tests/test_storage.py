@@ -159,3 +159,44 @@ def test_angle_curve_artifact_roundtrip(tmp_path):
     restored = artifacts.load_angle_curves()
     np.testing.assert_allclose(restored.curves["left_knee"], curves.curves["left_knee"])
     assert restored.mean_curve("left_knee").shape == (101,)
+
+
+# --------------------------------------------------------------------------
+# schema migration
+# --------------------------------------------------------------------------
+def test_an_existing_database_gains_new_columns_without_losing_data(tmp_path):
+    """A pilot user's history must survive a schema change.
+
+    SQLite's CREATE TABLE IF NOT EXISTS does nothing at all to a table that
+    already exists, so without an explicit migration a database created by an
+    earlier version would keep the old column set and fail on the next insert.
+    Asking people to start their history again is not an option in a tool whose
+    entire purpose is comparing someone against their own past.
+    """
+    import sqlite3
+
+    from gaitscreen.storage import schema
+
+    db = tmp_path / "old.db"
+    conn = sqlite3.connect(db)
+    conn.row_factory = sqlite3.Row
+    with conn:
+        conn.executescript(schema._DDL)
+        for column in ("view_kind", "step_width_norm", "trunk_lateral_sway_norm"):
+            conn.execute(f"ALTER TABLE sessions DROP COLUMN {column}")
+        conn.execute("INSERT INTO users(user_id, created_at) VALUES('u1', '2026-01-01T00:00:00')")
+        conn.execute(
+            "INSERT INTO sessions(session_id, user_id, session_date, created_at,"
+            " algo_version, video_source, cadence_spm)"
+            " VALUES('s1','u1','2026-01-01','2026-01-01T00:00:00','0.1.0','a.mp4',100)"
+        )
+    conn.close()
+
+    conn = schema.connect(db)
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(sessions)")}
+    assert {"view_kind", "step_width_norm", "trunk_lateral_sway_norm"} <= columns
+
+    row = conn.execute("SELECT * FROM sessions WHERE session_id='s1'").fetchone()
+    assert row["cadence_spm"] == 100
+    assert row["view_kind"] is None
+    conn.close()

@@ -29,6 +29,7 @@ def score_session(
     cfg: Config,
     *,
     cycles: Optional[Sequence[GaitCycle]] = None,
+    n_passes: Optional[int] = None,
     declared_device: Optional[str] = None,
     extra_notes: Optional[Sequence[str]] = None,
 ) -> QualityReport:
@@ -52,15 +53,30 @@ def score_session(
             "occluded walking path all cause this"
         )
 
-    # --- how many usable strides ----------------------------------------
+    # --- how much usable walking -----------------------------------------
+    # A coronal recording is never segmented into gait cycles -- there is no
+    # anterior axis to find heel strikes on -- so it is scored on the walking
+    # passes it did yield. Scoring it on a cycle count it was never going to
+    # produce would report a data problem where there is none.
     target = float(cfg["quality.target_cycle_count"])
-    n_valid = sum(1 for c in (cycles or []) if c.valid)
-    components["valid_cycle_count"] = _clip01(n_valid / target) if target > 0 else 0.0
-    if cycles is not None and n_valid < cfg["features.min_cycles_for_session"]:
-        notes.append(
-            f"only {n_valid} valid gait cycles were recovered; too few for stable "
-            "session metrics"
+    if cycles is None and n_passes is not None:
+        components["valid_cycle_count"] = _clip01(n_passes / 4.0)
+        if n_passes < 2:
+            notes.append(
+                f"only {n_passes} walking pass(es) towards or away from the "
+                "camera were usable; a longer recording with more passes gives "
+                "steadier numbers"
+            )
+    else:
+        n_valid = sum(1 for c in (cycles or []) if c.valid)
+        components["valid_cycle_count"] = (
+            _clip01(n_valid / target) if target > 0 else 0.0
         )
+        if cycles is not None and n_valid < cfg["features.min_cycles_for_session"]:
+            notes.append(
+                f"only {n_valid} valid gait cycles were recovered; too few for "
+                "stable session metrics"
+            )
 
     # --- frame rate ------------------------------------------------------
     fps = series.fps

@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 from ..config import Config
+from ..quality.view import INDETERMINATE, OBLIQUE, SAGITTAL
 from ..types import CORE_METRICS, Flag, QualityReport, SessionMetrics
 from . import absolute as absolute_module
 from . import baseline as baseline_module
@@ -43,18 +44,43 @@ class FlagResult:
         return out
 
 
+def _same_view(history: pd.DataFrame, view_kind: str | None) -> pd.DataFrame:
+    """Keep only prior sessions filmed from the same camera angle."""
+    if view_kind is None or history.empty or "view_kind" not in history:
+        return history
+    # Sessions stored before view was recorded have no value here. They were
+    # all sagittal: the coronal path did not exist, and a coronal clip analysed
+    # by the old code produced sagittal metrics. Treating them as sagittal
+    # keeps existing histories intact instead of discarding them.
+    recorded = history["view_kind"].fillna(SAGITTAL)
+    if view_kind == SAGITTAL:
+        return history[recorded.isin([SAGITTAL, OBLIQUE, INDETERMINATE])]
+    return history[recorded == view_kind]
+
+
 def evaluate(
     metrics: SessionMetrics,
     quality: QualityReport,
     history: pd.DataFrame,
     cfg: Config,
+    *,
+    view_kind: str | None = None,
 ) -> FlagResult:
     """Run every flagging rule for one session.
 
     ``history`` must contain only sessions strictly before the one being
     evaluated, otherwise a session enters its own baseline.
+
+    ``view_kind`` restricts the baseline to sessions filmed from the same
+    camera angle. A side-on and a towards-camera recording of the same walk on
+    the same day do not produce the same cadence, because they measure it by
+    different means, so comparing one against a baseline built from the other
+    would show a step change with no change in the person -- the same failure
+    mode as mixing algorithm versions, and just as indistinguishable from real
+    decline.
     """
     result = FlagResult()
+    history = _same_view(history, view_kind)
     result.flags.extend(absolute_module.evaluate(metrics, cfg))
 
     for metric in CORE_METRICS:

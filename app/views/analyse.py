@@ -223,6 +223,21 @@ def _render_result(cfg: Config, result, notes: str) -> None:
     st.divider()
     summary = summarise(result, cfg)
 
+    if _is_coronal(result):
+        # Said before the numbers, not after. Someone who filmed from the wrong
+        # place will otherwise read a short page of results as a complete one,
+        # and the missing measures are the ones the tool is mostly for.
+        st.warning(
+            "**This video was filmed towards the person, not from the side.**\n\n"
+            "Walking speed, step length, step-length asymmetry and time on both "
+            "feet cannot be worked out from this angle, so they are not shown. "
+            "Two measures a side-on video *cannot* give are shown instead: how "
+            "wide they walk, and how much they sway side to side.\n\n"
+            "These numbers are kept separate from side-on recordings when "
+            "tracking change over time, because the two are not comparable. "
+            "For a full result, film again from the side of the walking path."
+        )
+
     render_verdict(summary)
 
     st.subheader("What the walk looked like")
@@ -241,6 +256,11 @@ def _render_result(cfg: Config, result, notes: str) -> None:
         _save(cfg, result, notes)
 
 
+def _is_coronal(result) -> bool:
+    view = getattr(getattr(result, "analysis", None), "view", None)
+    return view is not None and view.kind == "coronal"
+
+
 def _render_technical(cfg: Config, result) -> None:
     """Everything a clinician or tester needs, kept out of the plain view."""
     analysis = result.analysis
@@ -255,7 +275,7 @@ def _render_technical(cfg: Config, result) -> None:
 
         st.markdown("---")
         st.markdown("**Metrics, as named in the pipeline and stored data**")
-        render_metrics(result.metrics)
+        render_metrics(result.metrics, coronal=_is_coronal(result))
 
         st.markdown("---")
         st.markdown("**Recording quality**")

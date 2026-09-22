@@ -37,6 +37,10 @@ CORE_METRICS: tuple[str, ...] = (
     "cadence_spm",
     "double_support_pct",
     "trunk_ap_sway_norm",
+    # Coronal-only; null on side-on sessions, which is handled the same way as
+    # any other unavailable metric rather than by keeping a second list.
+    "step_width_norm",
+    "trunk_lateral_sway_norm",
 )
 
 #: Direction of clinical deterioration for each metric: -1 means a *decrease*
@@ -49,6 +53,10 @@ DETERIORATION_DIRECTION: dict[str, int] = {
     "cadence_spm": -1,
     "double_support_pct": +1,
     "trunk_ap_sway_norm": +1,
+    # A wider base and more side-to-side sway are both what people do when they
+    # feel unsteady, so an increase in either is the direction of concern.
+    "step_width_norm": +1,
+    "trunk_lateral_sway_norm": +1,
 }
 
 
@@ -247,6 +255,12 @@ class SessionMetrics:
     cadence_spm: Optional[float] = None
     double_support_pct: Optional[float] = None
     trunk_ap_sway_norm: Optional[float] = None
+
+    # Coronal-only. A side-on recording cannot see either of these -- one leg
+    # hides the other, and side-to-side trunk motion is projected away -- so
+    # they stay None on every sagittal session rather than being estimated.
+    step_width_norm: Optional[float] = None
+    trunk_lateral_sway_norm: Optional[float] = None
 
     stride_time_mean_s: Optional[float] = None
     stride_time_sd_s: Optional[float] = None
