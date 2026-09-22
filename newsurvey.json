@@ -1,0 +1,284 @@
+[
+ {
+  "clip": "9-17\\Ananya_Limping_Living_Room_Moving_Camera.mp4",
+  "cycles": 8,
+  "total": 14,
+  "cadence": 105.03773762119846,
+  "indep": 73.47448475892436,
+  "stride": 0.9958848356672466,
+  "cv": null,
+  "ds": 28.346151374507226,
+  "asym": 10.443975737312659,
+  "asym_t": 119.84373001664717,
+  "sway": 0.12765342279618763,
+  "subjh": 0.4608816729576225,
+  "codes": [
+   "oblique_camera_angle",
+   "lower_body_occluded",
+   "walk_too_short"
+  ]
+ },
+ {
+  "clip": "9-17\\Ananya_Normal_Walk_Living_Room_Moving_Camera.mp4",
+  "cycles": 13,
+  "total": 25,
+  "cadence": 104.80451502143657,
+  "indep": 92.3529078621235,
+  "stride": 1.047102274455056,
+  "cv": 11.575068203791755,
+  "ds": 29.634368511671948,
+  "asym": 4.865097089812986,
+  "asym_t": 95.16585687089923,
+  "sway": 0.06550148810853142,
+  "subjh": 0.5459735594040152,
+  "codes": [
+   "lower_body_occluded"
+  ]
+ },
+ {
+  "clip": "9-17\\Vishal_Slow_Walking_Living_Room_Moving_Camera.mp4",
+  "cycles": 10,
+  "total": 14,
+  "cadence": 61.8986843546549,
+  "indep": 54.66546702775915,
+  "stride": 1.9465859353540398,
+  "cv": 9.69570619596547,
+  "ds": 47.081932840335014,
+  "asym": 2.1620357409478173,
+  "asym_t": 0.2821740625145571,
+  "sway": 0.0499907602323486,
+  "subjh": 0.6378674917899162,
+  "codes": []
+ },
+ {
+  "clip": "9-18\\Lady_Walking_InfrontOfPapa.mp4",
+  "cycles": 3,
+  "total": 7,
+  "cadence": 53.267109789266925,
+  "indep": 58.107808340727594,
+  "stride": 2.2242400710443717,
+  "cv": null,
+  "ds": 48.11306809872795,
+  "asym": 8.052986452150455,
+  "asym_t": 14.292657848322886,
+  "sway": 0.04425962465234716,
+  "subjh": 0.6907614537832507,
+  "codes": [
+   "walk_too_short"
+  ]
+ },
+ {
+  "clip": "9-18\\Papa_WalkingSlow_BackForth_Center.mp4",
+  "cycles": 9,
+  "total": 17,
+  "cadence": 64.59104433670015,
+  "indep": 55.60466788731964,
+  "stride": 1.86587610464755,
+  "cv": null,
+  "ds": 43.77802915277559,
+  "asym": 24.720767885461918,
+  "asym_t": 67.56461098908505,
+  "sway": 0.054600142060273055,
+  "subjh": 0.38373099575384845,
+  "codes": [
+   "subject_too_small",
+   "walk_too_short"
+  ]
+ },
+ {
+  "clip": "9-18\\Papa_WalkingSlow_Center.mp4",
+  "cycles": 2,
+  "total": 6,
+  "cadence": 62.268497577632566,
+  "indep": 54.85300174772628,
+  "stride": 1.9154338237199489,
+  "cv": null,
+  "ds": 44.54155461542962,
+  "asym": null,
+  "asym_t": null,
+  "sway": 0.06649426677732648,
+  "subjh": 0.7073209210400794,
+  "codes": [
+   "walk_too_short"
+  ]
+ },
+ {
+  "clip": "9-18\\Papa_WalkingSlow_Garage_tripod_2rounds.mp4",
+  "cycles": 24,
+  "total": 42,
+  "cadence": 52.17851243278112,
+  "indep": 48.73000026308884,
+  "stride": 2.2829270379484576,
+  "cv": 6.595325358700581,
+  "ds": 47.375974221126526,
+  "asym": 2.3502056636770843,
+  "asym_t": 10.440895321408279,
+  "sway": 0.03861368373103057,
+  "subjh": 0.4426953711377226,
+  "codes": [
+   "subject_too_small"
+  ]
+ },
+ {
+  "clip": "9-18\\Papa_WalkingSlow_Garage_tripod_2rounds_2.mp4",
+  "cycles": 20,
+  "total": 36,
+  "cadence": 62.622707538832366,
+  "indep": 55.56890364011092,
+  "stride": 1.9212756340693353,
+  "cv": 4.7135070738517575,
+  "ds": 44.325456991892594,
+  "asym": 0.6542760716070657,
+  "asym_t": 3.2428913785401106,
+  "sway": 0.04229375552792522,
+  "subjh": 0.4320458203975885,
+  "codes": [
+   "subject_too_small"
+  ]
+ },
+ {
+  "clip": "9-18\\papa_Walking_Center_SLow_LessSteps.mp4",
+  "cycles": 9,
+  "total": 17,
+  "cadence": 64.59104433670015,
+  "indep": 55.60466788731964,
+  "stride": 1.86587610464755,
+  "cv": null,
+  "ds": 43.77802915277559,
+  "asym": 24.720767885461918,
+  "asym_t": 67.56461098908505,
+  "sway": 0.054600142060273055,
+  "subjh": 0.38373099575384845,
+  "codes": [
+   "subject_too_small",
+   "walk_too_short"
+  ]
+ },
+ {
+  "clip": "9-1\\Vishal_Jeans_Walking_Left_Limping.mp4",
+  "cycles": 9,
+  "total": 13,
+  "cadence": 76.41618092283322,
+  "indep": 66.9643268746723,
+  "stride": 1.560072271269199,
+  "cv": null,
+  "ds": 38.007540748828106,
+  "asym": 43.29683603420238,
+  "asym_t": 16.180158933684137,
+  "sway": 0.07117615959536969,
+  "subjh": 0.31452931359274283,
+  "codes": [
+   "subject_too_small",
+   "subject_not_in_frame",
+   "walk_too_short"
+  ]
+ },
+ {
+  "clip": "9-1\\Vishal_Jeans_Walking_Left_Normal.mp4",
+  "cycles": 4,
+  "total": 8,
+  "cadence": 102.71135647158695,
+  "indep": 80.1584353894422,
+  "stride": 1.163408227606964,
+  "cv": null,
+  "ds": 32.21278465724096,
+  "asym": 5.160437365267063,
+  "asym_t": 3.3908268214950366,
+  "sway": 0.08696413764833026,
+  "subjh": 0.312380650813008,
+  "codes": [
+   "subject_too_small",
+   "walk_too_short"
+  ]
+ },
+ {
+  "clip": "9-1\\Vishal_Jeans_Walking_Left_Slow_Walk.mp4",
+  "cycles": 7,
+  "total": 11,
+  "cadence": 61.079856692047976,
+  "indep": 55.11813658722688,
+  "stride": 1.961703714901608,
+  "cv": null,
+  "ds": 44.02117168258741,
+  "asym": 2.393854278700346,
+  "asym_t": 0.5820777364342143,
+  "sway": 0.04969459132017358,
+  "subjh": 0.3392517377789407,
+  "codes": [
+   "subject_too_small",
+   "walk_too_short"
+  ]
+ },
+ {
+  "clip": "9-1\\Vishal_Jeans_Walking_Right_Limping.mp4",
+  "cycles": 10,
+  "total": 14,
+  "cadence": 80.71168600344981,
+  "indep": 76.17629810636765,
+  "stride": 1.4868894578411846,
+  "cv": 2.1915498624275993,
+  "ds": 39.26733749899655,
+  "asym": 26.642383452546596,
+  "asym_t": 0.8227298668302578,
+  "sway": 0.06504348881213179,
+  "subjh": 0.30642377718848723,
+  "codes": [
+   "subject_too_small"
+  ]
+ },
+ {
+  "clip": "9-1\\Vishal_Jeans_Walking_Right_Normal.mp4",
+  "cycles": 4,
+  "total": 8,
+  "cadence": 107.29605957741866,
+  "indep": 84.86572356626849,
+  "stride": 1.113125167551726,
+  "cv": null,
+  "ds": 32.690683980956194,
+  "asym": 7.7166492079542985,
+  "asym_t": 3.6699010021098957,
+  "sway": 0.06160258161490072,
+  "subjh": 0.3157772369396585,
+  "codes": [
+   "subject_too_small",
+   "walk_too_short"
+  ]
+ },
+ {
+  "clip": "9-1\\Vishal_Jeans_Walking_Right_Slow_Walk.mp4",
+  "cycles": 7,
+  "total": 11,
+  "cadence": 71.45258240027161,
+  "indep": 58.91242401997886,
+  "stride": 1.6758858158632113,
+  "cv": null,
+  "ds": 41.18345715734366,
+  "asym": 1.5686261452319181,
+  "asym_t": 3.354704893954237,
+  "sway": 0.05908887666058597,
+  "subjh": 0.3349413327529036,
+  "codes": [
+   "subject_too_small",
+   "walk_too_short"
+  ]
+ },
+ {
+  "clip": "frontandbackvideo\\Papa_Walking_FrontAndBack_SunriseRedmond.mp4",
+  "cycles": 9,
+  "total": 25,
+  "cadence": 43.607842621024744,
+  "indep": 10.842909139962098,
+  "stride": 1.5456307869591837,
+  "cv": null,
+  "ds": null,
+  "asym": 7.817812694191926,
+  "asym_t": 190.310969546872,
+  "sway": 0.021780247032001945,
+  "subjh": 0.27044027435246615,
+  "codes": [
+   "subject_too_small",
+   "oblique_camera_angle",
+   "walk_too_short"
+  ]
+ }
+]
