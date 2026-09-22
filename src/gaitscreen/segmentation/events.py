@@ -27,7 +27,10 @@ import numpy as np
 
 from ..config import Config
 from ..pose.schema import HIPS, SIDE_LANDMARKS, SIDES
-from ..signal.events import find_extrema, fractional_time, refine_extremum
+from ..pose.to_pixels import leg_length_px
+from ..signal.events import (find_extrema, fractional_time, refine_extremum,
+                             refine_zero_crossing)
+from ..signal.resample import _true_runs
 from ..types import GaitEvent, PixelSeries, WalkPass
 
 
@@ -143,7 +146,9 @@ def _zeni_events(
     min_stride = float(cfg["segmentation.min_stride_time_s"])
     prominence = float(cfg["segmentation.peak_prominence_frac"])
     refine = bool(cfg["segmentation.subframe_refine"])
+    prefer_contact = str(cfg["segmentation.toe_off_method"]) == "foot_contact"
     events: list[GaitEvent] = []
+    periods: dict[str, float | None] = {}
 
     for side in SIDES:
         heel = _anterior(window, side, "heel", walk_pass.direction)
@@ -152,23 +157,161 @@ def _zeni_events(
         period = estimate_stride_period(heel, window.fps, cfg)
         if period is None:
             period = estimate_stride_period(toe, window.fps, cfg)
+        periods[side] = period
         separation = max(min_stride, 0.6 * period) if period else min_stride
 
-        for signal, kind, extremum in (
-            (heel, "heel_strike", "max"),
-            (toe, "toe_off", "min"),
+        # Heel strike keeps the Zeni rule. The heel's anterior maximum is a
+        # sharp, well-conditioned marker of initial contact, and every measure
+        # built on it -- stride time, variability, cadence, asymmetry -- has been
+        # validated against it.
+        search = _detrend(heel, window.fps, period) if period else heel
+        for index in find_extrema(
+            search, fps=window.fps, kind="max",
+            min_separation_s=separation, prominence_frac=prominence,
         ):
-            search = _detrend(signal, window.fps, period) if period else signal
-            indices = find_extrema(
-                search, fps=window.fps, kind=extremum,
-                min_separation_s=separation, prominence_frac=prominence,
+            events.append(
+                _make_event(window, walk_pass, search, index, "heel_strike", side,
+                            refine=refine, method="zeni")
             )
-            for index in indices:
-                events.append(
-                    _make_event(window, walk_pass, search, index, kind, side,
-                                refine=refine, method="zeni")
-                )
+
+    # Toe-off is decided for the pass as a whole, never per leg. Double support
+    # is the overlap between the two legs' contacts, so measuring one leg from
+    # ground contact and the other from an anterior minimum -- two definitions
+    # that sit several frames apart -- would put a spurious asymmetry straight
+    # into the result.
+    contact = (
+        {side: _contact_toe_offs(window, side, periods[side], cfg) for side in SIDES}
+        if prefer_contact else {side: None for side in SIDES}
+    )
+    if all(value is not None for value in contact.values()):
+        for value in contact.values():
+            events.extend(value)
+        return events
+
+    # Fall back to the anterior minimum for both legs -- see
+    # :func:`_contact_toe_offs` for when ground contact cannot be identified.
+    for side in SIDES:
+        period = periods[side]
+        separation = max(min_stride, 0.6 * period) if period else min_stride
+        toe = _anterior(window, side, "foot_index", walk_pass.direction)
+        search = _detrend(toe, window.fps, period) if period else toe
+        for index in find_extrema(
+            search, fps=window.fps, kind="min",
+            min_separation_s=separation, prominence_frac=prominence,
+        ):
+            events.append(
+                _make_event(window, walk_pass, search, index, "toe_off", side,
+                            refine=refine, method="zeni")
+            )
     return events
+
+
+def _foot_speed(
+    window: PixelSeries, side: str, period: float | None
+) -> np.ndarray | None:
+    """Foot speed in leg lengths per stride.
+
+    Dividing by leg length removes how big the subject is in frame; multiplying
+    by the stride period removes how fast they walk. A planted foot then reads
+    near zero and a swinging foot around three, for any subject at any pace, so
+    a single fixed threshold serves every recording.
+    """
+    if not period or period <= 0:
+        return None
+    leg = leg_length_px(window)
+    if not np.isfinite(leg) or leg <= 0:
+        return None
+
+    foot = 0.5 * (window.joint(side, "heel") + window.joint(side, "foot_index"))
+    if int(np.isfinite(foot).all(axis=1).sum()) < 10:
+        return None
+    speed = np.linalg.norm(np.gradient(foot, axis=0), axis=1) * window.fps
+    return speed * period / leg
+
+
+def _contact_toe_offs(
+    window: PixelSeries, side: str, period: float | None, cfg: Config
+) -> list[GaitEvent] | None:
+    """Toe-off as the end of the foot's ground contact, measured from foot speed.
+
+    The anterior-minimum rule is badly conditioned for toe-off, and the raw
+    signal shows why. While the foot is planted the pelvis keeps travelling over
+    it, so the foot's *pelvis-relative* anterior position slides steadily
+    backwards for the whole of stance with no distinct minimum: on pilot footage
+    it fell from +47 px to -28 px across forty frames of a foot that was
+    demonstrably stationary. The minimum therefore lands wherever noise and the
+    pelvis estimate happen to put it, and the error grows as the walk speeds up
+    and the plateau shortens.
+
+    Ground contact itself is unambiguous in a fixed-camera recording: a planted
+    foot barely moves in the image -- 2-10 px/s against 300-450 px/s in swing --
+    so taking toe-off as the end of that stationary interval measures the event
+    instead of inferring it from a shape.
+
+    Returns ``None`` when the stationary assumption does not hold, so the caller
+    falls back. That is judged from the signal rather than from metadata: on
+    treadmill, in-place or camera-tracked footage a planted foot still travels
+    across the image, and the detected contacts then occupy an implausible share
+    of the cycle.
+    """
+    speed = _foot_speed(window, side, period)
+    if speed is None:
+        return None
+
+    section = cfg.section("segmentation")
+    threshold = float(section["stance_speed_threshold"])
+    min_fraction = float(section["min_stance_fraction"])
+    max_fraction = float(section["max_stance_fraction"])
+
+    stance = np.isfinite(speed) & (speed < threshold)
+
+    # Close brief gaps before measuring runs. A planted foot is not perfectly
+    # still -- it rolls from heel to toe, and the heel lifts before the toe
+    # does -- so the speed flickers above the threshold mid-contact and splits
+    # one contact into several. Without this the run count swings between 0 and
+    # 5 on identical footage purely from where the flickers land.
+    gap = max(1, int(round(float(section["stance_merge_gap_fraction"])
+                           * period * window.fps)))
+    for start, stop in _true_runs(~stance):
+        if (stop - start) <= gap and start > 0 and stop < stance.size:
+            stance[start:stop] = True
+
+    minimum_frames = max(1, int(round(
+        float(section["min_contact_fraction"]) * period * window.fps)))
+    runs = [(a, b) for a, b in _true_runs(stance) if (b - a) >= minimum_frames]
+    if len(runs) < 2:
+        return None
+
+    # Self-validation: stance occupies roughly 60% of the cycle in any real
+    # walk, more when walking slowly. Far outside that band means the foot was
+    # never actually stationary -- a moving camera, a treadmill -- and this
+    # measurement does not apply to the recording.
+    fractions = [(b - a) / (period * window.fps) for a, b in runs]
+    if not min_fraction <= float(np.median(fractions)) <= max_fraction:
+        return None
+
+    foot_indices = [int(SIDE_LANDMARKS[side][joint])
+                    for joint in ("heel", "foot_index")]
+    events: list[GaitEvent] = []
+    for _, end in runs:
+        if end >= speed.size:
+            continue
+        # Speed crosses the threshold steeply as the foot leaves the ground, so
+        # the crossing locates toe-off far more precisely than a frame index.
+        fractional = refine_zero_crossing(speed - threshold, end - 1)
+        events.append(
+            GaitEvent(
+                t=float(fractional_time(window.t, fractional)),
+                kind="toe_off",
+                side=side,
+                frame=window.n_frames and int(round(fractional)),
+                confidence=float(np.mean(
+                    window.valid[max(0, end - 2):end + 2, foot_indices]
+                )),
+                method="foot_contact",
+            )
+        )
+    return events or None
 
 
 # --------------------------------------------------------------------------

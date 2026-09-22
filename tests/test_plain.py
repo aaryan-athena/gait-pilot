@@ -184,15 +184,16 @@ def test_double_support_always_carries_its_known_bias(cfg):
     summary = summarise(_FakeResult(metrics, _flags()), cfg)
     card = next(c for c in summary.cards if c.key == "double_support_pct")
 
-    assert "reads this measure about 8-10 points high" in card.note
+    assert "least reliable of the measures" in card.note
 
 
 def test_biased_metric_does_not_headline_on_an_absolute_threshold(cfg):
     """A caregiver must not be told to seek advice about a known artefact.
 
-    Double support reads high from 2D video, so on a healthy adult it crosses
-    the illustrative threshold. The flag stays visible on the card and in the
-    clinical view; it just does not drive the headline.
+    Double support is the shakiest measure here -- toe-off is the hardest
+    event to see in 2D -- so it must not be what a caregiver is told to act
+    on. The flag stays visible on the card and in the clinical view; it just
+    does not drive the headline.
     """
     metrics = SessionMetrics(double_support_pct=39.0, cadence_spm=100)
     summary = summarise(

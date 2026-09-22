@@ -89,9 +89,10 @@ PLAIN: dict[str, dict] = {
                 "ground. People who feel unsteady tend to spend longer on both "
                 "feet, because it is the stable part of the cycle.",
         "known_bias": (
-            "This tool reads this measure about 8-10 points high compared with "
-            "laboratory equipment, so judge it by how it changes across sessions "
-            "rather than against the number itself."
+            "This is the least reliable of the measures here: the moment a toe "
+            "leaves the ground is genuinely hard to see in a video. Judge it by "
+            "how it changes across sessions rather than against the number "
+            "itself."
         ),
     },
     "trunk_ap_sway_norm": {

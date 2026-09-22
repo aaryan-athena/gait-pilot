@@ -175,22 +175,48 @@ history can be re-derived without re-running pose estimation, and
 `gaitscreen sessions` warns when a user's history spans more than one version.
 **Reprocess a user's full history after any algorithm change.**
 
-## 12. Double-support time reads high — *needs local calibration*
+## 12. Double-support time is the least trustworthy metric — *still needs local calibration*
 
-Measured double support on the sample clips sits around 31% of the gait cycle
-for healthy adults walking normally, where the literature expects roughly 20–25%.
-The synthetic fixture, where the true value is known to be 20%, is recovered
-correctly, so the arithmetic is right — the bias is in event timing from 2D
-markerless landmarks, most likely the heel reaching its anterior maximum slightly
-before actual contact.
+Double support is the share of the cycle with both feet down. It is derived
+from toe-off, and toe-off is the hardest of the four events to see in 2D:
+a heel strike is a clear arrival, whereas a toe leaving the ground is a
+gradual loss of contact with no sharp landmark signature.
 
-Consequence: the illustrative absolute threshold (>30% = high concern) currently
-fires on healthy adults. That threshold has deliberately **not** been widened to
-make the sample data pass, because tuning a clinical constant to fit four stock
-videos would be worse than leaving it visibly wrong. Measure the offset on your
-own setup and set the threshold from that. The *trend* in double support is
-unaffected, since a consistent bias cancels when comparing a person to
-themselves — which is the tool's actual purpose.
+**Fixed in ALGO_VERSION 0.2.0.** Toe-off was previously taken from the toe's
+anterior minimum (the Zeni rule). That rule is badly conditioned for toe-off,
+because the pelvis travels forward over a planted foot for the whole of
+stance, so the pelvis-relative toe position slides downward continuously and
+has no minimum anywhere near the moment the foot actually lifts. It landed
+late and grew later the slower the walk, which is why the effect was worst on
+exactly the frail, slow gait the tool exists to watch. Toe-off is now measured
+as the end of ground contact, from foot speed normalised to leg lengths per
+stride; a planted foot measures near zero and a swinging foot around three,
+so the separation is wide and pace-independent.
+
+Effect on the pilot clips:
+
+| clip | stride | stance | double support (0.1.x → 0.2.0) |
+| --- | --- | --- | --- |
+| normal pace, left | 1.16 s | 58.1% | 32.2% → **16.4%** |
+| normal pace, right | 1.11 s | 58.9% | — → **18.5%** |
+| limping, left | 1.56 s | 65.2% | — → **30.2%** |
+| slow, left | 1.96 s | 65.8% | 44.0% → **31.3%** |
+| slow, 2 rounds | 2.28 s | 68.9% | 47.4% → **37.6%** |
+
+Stance now measures 58–59% of the cycle at a normal pace against a textbook
+60%, and correctly measures more when the walk is slow or limping.
+
+**Residual limitation.** At a normal pace the values now sit slightly *below*
+the 20–25% the literature reports, rather than far above it. The remaining
+error is in the same place it always was — event timing from markerless 2D
+landmarks — and it has not been tuned away, because fitting a clinical
+constant to a handful of pilot videos would be worse than leaving a known
+offset visible. Measure the offset on your own setup before relying on the
+absolute threshold. The *trend* remains the usable signal, since a consistent
+bias cancels when comparing a person to themselves.
+
+**Stored sessions from 0.1.x are not comparable with these values** and must
+be reprocessed from retained raw landmarks (see item 11).
 
 ## 13. Assistive-device asymmetry cannot be judged from one side
 

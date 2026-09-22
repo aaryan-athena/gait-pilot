@@ -26,11 +26,13 @@ from gaitscreen.pose.schema import N_LANDMARKS, PL
 from gaitscreen.types import RawLandmarks, VideoInfo
 
 
-#: How far the toe leads the heel, in cycles. Puts toe-off at 60% of the cycle.
-TOE_PHASE_LEAD = 0.1
+#: Share of the gait cycle the foot spends on the ground, from initial contact
+#: to toe-off. 60% is the textbook value at a comfortable pace.
+STANCE_FRACTION = 0.60
 
-#: Double-support fraction implied by TOE_PHASE_LEAD and a 50% contralateral
-#: offset: (0.1 + 0.1) of the cycle.
+#: Double-support fraction implied by a 60% stance and a 50% contralateral
+#: offset: the opposite foot lifts at 10% and lands at 50%, so the two
+#: double-support phases are 0-10% and 50-60% of the cycle.
 EXPECTED_DOUBLE_SUPPORT_PCT = 20.0
 
 
@@ -125,9 +127,16 @@ def synthetic_walk(
     place(PL.RIGHT_SHOULDER, hip_x + lean, hip_mid_y + trunk_length)
     place(PL.NOSE, hip_x + lean, hip_mid_y + trunk_length + 0.25 * leg_length_px)
 
+    # Stride length must equal speed x stride time, or the foot would not stay
+    # put under a pelvis travelling at ``speed_px_s``. With no translation
+    # (treadmill), the belt supplies an equivalent stride length instead.
+    stride_length_px = (
+        speed_px_s * stride_time_s if not in_place else step_amplitude_px / 0.3
+    )
+
     for side, sign in (("left", 1.0), ("right", -1.0)):
         p = phase[side]
-        anterior = step_amplitude_px * np.cos(2 * np.pi * p)
+        anterior = _foot_anterior(p, stride_length_px)
         lift = _swing_lift(p) * 0.10 * leg_length_px
 
         ankle_x = hip_x + anterior
@@ -139,15 +148,11 @@ def synthetic_walk(
         stance_dip = 0.02 * leg_length_px * np.exp(-(((np.mod(p, 1.0) - 0.15) / 0.10) ** 2))
         ankle_y = 0.06 * leg_length_px + lift - stance_dip
         place(_pl(side, "ANKLE"), ankle_x, ankle_y)
-        # Heel sits behind the ankle; its anterior maximum is heel strike.
+        # Heel behind the ankle, toe ahead of it; the whole foot shares one
+        # ground-contact interval, so toe-off is the end of stance for both.
         place(_pl(side, "HEEL"), ankle_x - 0.04 * leg_length_px, ankle_y)
-        # The toe leads the heel by a tenth of a cycle, so its anterior *minimum*
-        # -- toe-off -- lands at 60% of the cycle as it does in real gait, rather
-        # than at 50% where a rigid foot would put it. This makes the synthetic
-        # double-support fraction 20%, a physiological value the tests can check.
-        toe_anterior = step_amplitude_px * np.cos(2 * np.pi * (p - TOE_PHASE_LEAD))
         place(_pl(side, "FOOT_INDEX"),
-              hip_x + toe_anterior + 0.12 * leg_length_px, ankle_y * 0.7)
+              ankle_x + 0.12 * leg_length_px, ankle_y * 0.7)
 
         # Knee by two-link inverse kinematics from the hip and ankle, rather
         # than at their midpoint. The midpoint constrains the limb to a shallow
@@ -266,12 +271,73 @@ def _knee_by_ik(
             hip_y + along * uy + sign * offset * py)
 
 
-def _swing_lift(phase: np.ndarray) -> np.ndarray:
-    """Raised-cosine foot clearance over the swing portion of the cycle."""
+def _foot_anterior(phase: np.ndarray, stride_length: float) -> np.ndarray:
+    """Anterior offset of a foot that is planted through stance, then swings.
+
+    This is what a real foot does, and modelling it matters for more than
+    realism. A foot on a cosine path never stops moving, so a fixture built
+    that way cannot exercise any detector that works from ground contact -- and
+    it quietly misrepresents the signal the pipeline actually sees.
+
+    Through stance the foot holds still in the world while the pelvis travels
+    over it, so the pelvis-relative offset falls linearly from +0.3 to -0.3 of a
+    stride length. Through swing it travels one stride length forward. The
+    offset is therefore at its maximum at heel strike and its minimum at
+    toe-off, which keeps both the Zeni rules valid on this fixture as well.
+    """
     fractional = np.mod(phase, 1.0)
-    swing_start, swing_end = 0.62, 1.0
-    within = (fractional >= swing_start) & (fractional <= swing_end)
-    normalised = (fractional - swing_start) / (swing_end - swing_start)
+    pelvis = fractional * stride_length
+
+    swing = (fractional - STANCE_FRACTION) / (1.0 - STANCE_FRACTION)
+    foot = np.where(
+        fractional <= STANCE_FRACTION,
+        0.0,
+        stride_length * _swing_travel(np.clip(swing, 0.0, 1.0)),
+    )
+    return foot - pelvis + 0.5 * STANCE_FRACTION * stride_length
+
+
+#: Share of swing spent accelerating the foot off the ground, and share spent
+#: arresting it before contact. Both are short, and the arrest is the shorter
+#: of the two: a foot is placed rather than eased down, which is why heel
+#: strike is an impact. They are not zero, because a foot cannot change speed
+#: instantaneously and a fixture that pretends otherwise puts a corner in the
+#: signal that no real -- and no filtered -- recording contains.
+SWING_RAMP_UP = 0.04
+SWING_RAMP_DOWN = 0.02
+
+
+def _swing_travel(s: np.ndarray) -> np.ndarray:
+    """Fraction of a stride travelled by ``s`` through swing, ``s`` in [0, 1].
+
+    Swing speed follows a trapezoid with raised-cosine ramps, rather than the
+    half-sine a cosine path implies. The distinction is not cosmetic. A sine
+    profile leaves and reaches the ground at zero speed, so a foot on it spends
+    an eighth of its swing below any sane ground-contact threshold and the
+    fixture reads back ~65% stance when it was told to produce 60%. It also
+    puts the anterior maximum several frames *before* the prescribed heel
+    strike, which silently biases every event-timing test on this fixture.
+    """
+    up, down = SWING_RAMP_UP, SWING_RAMP_DOWN
+    # Normalise so the profile covers exactly one stride length: each ramp
+    # contributes half the area a flat segment of the same length would.
+    peak = 1.0 / (1.0 - 0.5 * (up + down))
+
+    flat = peak * (0.5 * up + (s - up))
+
+    rising = peak * 0.5 * (s - (up / np.pi) * np.sin(np.pi * s / up))
+
+    tail = np.clip(1.0 - s, 0.0, None) / down
+    falling = 1.0 - peak * 0.5 * down * (tail - np.sin(np.pi * tail) / np.pi)
+
+    return np.where(s < up, rising, np.where(s > 1.0 - down, falling, flat))
+
+
+def _swing_lift(phase: np.ndarray) -> np.ndarray:
+    """Raised-cosine foot clearance, zero while the foot is on the ground."""
+    fractional = np.mod(phase, 1.0)
+    within = fractional > STANCE_FRACTION
+    normalised = (fractional - STANCE_FRACTION) / (1.0 - STANCE_FRACTION)
     lift = np.zeros_like(phase)
     lift[within] = np.sin(np.pi * normalised[within])
     return lift

@@ -71,6 +71,32 @@ segmentation:
   # unbroken tracking to measure a 0.9s stride.
   min_segment_strides: 2.0
   peak_prominence_frac: 0.15 # of signal range
+  # Toe-off detection. foot_contact measures the end of ground contact from
+  # foot speed; zeni infers it from the toe's anterior minimum, which is badly
+  # conditioned because the pelvis keeps moving over a planted foot (see
+  # segmentation/events.py). foot_contact falls back to zeni on its own when
+  # the foot is not stationary during stance -- treadmill or moving-camera
+  # footage -- so this only needs changing to force the old behaviour.
+  toe_off_method: foot_contact
+  # Foot speed below this counts as ground contact, in leg lengths per stride.
+  # A planted foot measures near zero and a swinging foot around three, so the
+  # separation is wide and the exact value is not critical.
+  # Swept against pilot footage: at 0.9 the normal-paced clips measure 57-59%
+  # of the cycle in stance against a textbook 60%, and the slow clips
+  # correctly measure more. Lower values clip the start and end of contact.
+  stance_speed_threshold: 0.9
+  # A planted foot is not perfectly still -- it rolls heel to toe and the heel
+  # lifts before the toe -- so speed flickers above the threshold mid-contact.
+  # Gaps shorter than this share of a stride are closed before contacts are
+  # measured; without it the contact count is unstable on identical footage.
+  stance_merge_gap_fraction: 0.08
+  # Contacts shorter than this share of a stride are noise, not steps.
+  min_contact_fraction: 0.25
+  # Plausible share of the gait cycle spent in stance, used to detect that the
+  # stationary-foot assumption has failed, in which case toe-off falls back to
+  # the zeni rule for both legs.
+  min_stance_fraction: 0.40
+  max_stance_fraction: 0.85
   # Acceleration/deceleration strides inflate variability -- drop them.
   exclude_strides_at_pass_edges: 1
   # A direction reversal (turn) ends a pass.

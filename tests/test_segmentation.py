@@ -253,3 +253,95 @@ def test_independent_cadence_shares_no_machinery_with_zeni(cfg):
     reference = independent_cadence_spm(series, cfg)
     assert reference is not None
     assert abs(reference - 120.0 / 1.10) < 10.0
+
+
+# --------------------------------------------------------------------------
+# toe-off from measured ground contact
+# --------------------------------------------------------------------------
+def _stance_fractions(events):
+    """Share of each cycle spent in stance, per side, from an event list."""
+    out = []
+    for side in ("left", "right"):
+        strikes = sorted(e.t for e in events
+                         if e.side == side and e.kind == "heel_strike")
+        lifts = sorted(e.t for e in events
+                       if e.side == side and e.kind == "toe_off")
+        for start, end in zip(strikes, strikes[1:]):
+            inside = [t for t in lifts if start < t < end]
+            if len(inside) == 1:
+                out.append((inside[0] - start) / (end - start))
+    return np.asarray(out)
+
+
+def test_contact_toe_off_recovers_prescribed_stance(cfg):
+    """The prescribed 60% stance must come back, not the ~70% Zeni gave.
+
+    Zeni's toe-off rule looks for the toe's anterior minimum, but the pelvis
+    travels over a planted foot for the whole of stance, so that signal slides
+    downward continuously and has no minimum where toe-off actually is. It
+    lands late, which inflates stance and double support together.
+    """
+    from fixtures.synthetic import STANCE_FRACTION
+
+    series, _, segments = _prepare(cfg, fps=60.0, n_strides=16,
+                                   stride_time_cv=0.0, speed_px_s=180.0)
+    passes = direction_module.find_passes(series, cfg, segments)
+    events = detect_events(series, passes[0], cfg).events
+
+    assert {e.method for e in events if e.kind == "toe_off"} == {"foot_contact"}
+    stance = _stance_fractions(events)
+    assert stance.size >= 8
+    assert abs(float(np.median(stance)) - STANCE_FRACTION) < 0.05
+
+
+def test_contact_toe_off_is_pace_invariant(cfg):
+    """Foot speed is normalised by leg length per stride, so no threshold
+    retuning should be needed between a slow walk and a brisk one."""
+    medians = []
+    for stride_time in (0.85, 1.60):
+        series, _, segments = _prepare(cfg, fps=60.0, n_strides=16,
+                                       stride_time_s=stride_time,
+                                       stride_time_cv=0.0,
+                                       speed_px_s=180.0)
+        passes = direction_module.find_passes(series, cfg, segments)
+        events = detect_events(series, passes[0], cfg).events
+        medians.append(float(np.median(_stance_fractions(events))))
+
+    assert abs(medians[0] - medians[1]) < 0.05
+
+
+def test_contact_toe_off_falls_back_when_the_foot_never_settles(cfg):
+    """Walking in place, or on a treadmill, breaks the stationary-foot
+    assumption the contact rule rests on. It must notice and hand back to
+    Zeni rather than report a contact interval it cannot have measured."""
+    series, _, segments = _prepare(cfg, fps=60.0, n_strides=16,
+                                   stride_time_cv=0.0, in_place=True)
+    passes = direction_module.find_passes(series, cfg, segments)
+    events = detect_events(series, passes[0], cfg).events
+
+    assert {e.method for e in events if e.kind == "toe_off"} == {"zeni"}
+
+
+def test_toe_off_method_is_never_mixed_across_legs(cfg):
+    """The two rules disagree by several percent of the cycle. Using one per
+    leg would show up as step-length/timing asymmetry that is an artefact of
+    the detector, which is exactly the kind of false finding this tool must
+    not produce."""
+    for kwargs in (dict(speed_px_s=180.0), dict(in_place=True)):
+        series, _, segments = _prepare(cfg, fps=60.0, n_strides=16,
+                                       stride_time_cv=0.0, **kwargs)
+        passes = direction_module.find_passes(series, cfg, segments)
+        events = detect_events(series, passes[0], cfg).events
+        assert len({e.method for e in events if e.kind == "toe_off"}) == 1
+
+
+def test_contact_toe_off_can_be_disabled(cfg):
+    """The old rule stays reachable so a stored 0.1.x session can be
+    reproduced exactly when someone needs to check a historical number."""
+    cfg = cfg.with_overrides({"segmentation": {"toe_off_method": "zeni"}})
+    series, _, segments = _prepare(cfg, fps=60.0, n_strides=16,
+                                   stride_time_cv=0.0, speed_px_s=180.0)
+    passes = direction_module.find_passes(series, cfg, segments)
+    events = detect_events(series, passes[0], cfg).events
+
+    assert {e.method for e in events if e.kind == "toe_off"} == {"zeni"}
