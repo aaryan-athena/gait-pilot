@@ -306,7 +306,7 @@ def _contact_toe_offs(
                 side=side,
                 frame=window.n_frames and int(round(fractional)),
                 confidence=float(np.mean(
-                    window.valid[max(0, end - 2):end + 2, foot_indices]
+                    window.trusted(slice(max(0, end - 2), end + 2), foot_indices)
                 )),
                 method="foot_contact",
             )
@@ -352,7 +352,7 @@ def _make_event(
     low = max(0, int(index) - 2)
     high = min(window.n_frames, int(index) + 3)
     indices = [int(SIDE_LANDMARKS[side][j]) for j in ("heel", "ankle", "foot_index")]
-    confidence = float(np.mean(window.valid[low:high, indices]))
+    confidence = float(np.mean(window.trusted(slice(low, high), indices)))
 
     return GaitEvent(
         t=float(t), kind=kind, side=side,

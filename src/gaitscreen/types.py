@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, Optional, Sequence
 
 import numpy as np
 
@@ -74,9 +74,24 @@ class VideoInfo:
     n_frames: int
     warnings: list[str] = field(default_factory=list)
 
+    # Timing integrity, filled in by pose extraction from the camera's own
+    # per-frame timestamps. Phones record at a variable rate: in dim light they
+    # silently skip frames, and the container then reports an *average* rate
+    # (43 fps on one pilot clip nominally shot at 60). ``fps`` becomes the
+    # nominal grid rate, ``n_frames`` the length of that grid, and each skipped
+    # frame a NaN row -- so ``arange(n) / fps`` is the true clock.
+    container_fps: Optional[float] = None
+    dropped_frames: int = 0
+    max_gap_frames: int = 0
+
     @property
     def duration_s(self) -> float:
         return self.n_frames / self.fps if self.fps else 0.0
+
+    @property
+    def drop_rate_pct(self) -> float:
+        """Share of the frame grid the camera never delivered."""
+        return 100.0 * self.dropped_frames / self.n_frames if self.n_frames else 0.0
 
     @property
     def frame_interval_s(self) -> float:
@@ -98,14 +113,41 @@ class RawLandmarks:
     visibility: np.ndarray  # (n, 33)
     detected: np.ndarray  # (n,) bool
     video: VideoInfo
+    # (n,) bool -- False on rows the camera never delivered a frame for. None
+    # means every row is a real frame, which is true of anything recorded
+    # before timing was rebuilt from timestamps, and of the synthetic fixtures.
+    observed: Optional[np.ndarray] = None
 
     @property
     def n_frames(self) -> int:
         return int(self.t.shape[0])
 
     @property
+    def observed_mask(self) -> np.ndarray:
+        if self.observed is None:
+            return np.ones(self.n_frames, dtype=bool)
+        return self.observed
+
+    @property
+    def frame_rows(self) -> np.ndarray:
+        """Row index of each frame actually decoded from the file, in order.
+
+        Anything that walks the video file frame by frame -- the camera-motion
+        check, the annotated overlay -- must go through this, because once
+        dropped frames are materialised the n-th decoded frame is no longer
+        row n.
+        """
+        return np.flatnonzero(self.observed_mask)
+
+    @property
     def detection_rate(self) -> float:
-        return float(np.mean(self.detected)) if self.n_frames else 0.0
+        """Share of *delivered* frames in which a pose was found.
+
+        Rows for frames the camera dropped are excluded: nothing was there to
+        detect, and counting them would blame the tracker for the lighting.
+        """
+        seen = self.observed_mask
+        return float(np.mean(self.detected[seen])) if seen.any() else 0.0
 
 
 @dataclass
@@ -117,6 +159,10 @@ class PixelSeries:
     visibility: np.ndarray  # (n, 33)
     valid: np.ndarray  # (n, 33) bool -- False where interpolated or missing
     video: VideoInfo
+    # (n,) bool -- rows the camera never delivered a frame for. Still False in
+    # ``valid``, because nothing was measured there, but not evidence that the
+    # tracker lost the subject either; see :meth:`trusted`.
+    camera_gap: Optional[np.ndarray] = None
 
     @property
     def n_frames(self) -> int:
@@ -138,6 +184,25 @@ class PixelSeries:
     def midpoint(self, a: PL | int, b: PL | int) -> np.ndarray:
         return 0.5 * (self.point(a) + self.point(b))
 
+    def trusted(self, frames: slice, landmarks: Sequence[int]) -> np.ndarray:
+        """Samples that can be relied on: measured, or bridging a camera skip.
+
+        ``valid`` is False in two very different situations. When the tracker
+        loses a foot it still reports one, inferred from the rest of the body,
+        so the neighbouring samples are suspect too -- that is what the event
+        confidence gate exists to catch. When the camera skips a frame the
+        samples either side are genuine detections and the gap is a few frames
+        of a signal with nothing above 6 Hz, so filling it is close to exact.
+        On the pilot metronome clip, strides rejected only because of skipped
+        frames matched the metronome exactly as well as the rest.
+        """
+        mask = self.valid[frames][:, list(landmarks)]
+        if self.camera_gap is None:
+            return mask
+        gap = self.camera_gap[frames][:, None]
+        filled = np.isfinite(self.xy[frames][:, list(landmarks), 0])
+        return mask | (gap & filled)
+
     def slice_frames(self, start: int, stop: int) -> "PixelSeries":
         return PixelSeries(
             t=self.t[start:stop],
@@ -145,6 +210,7 @@ class PixelSeries:
             visibility=self.visibility[start:stop],
             valid=self.valid[start:stop],
             video=self.video,
+            camera_gap=None if self.camera_gap is None else self.camera_gap[start:stop],
         )
 
 

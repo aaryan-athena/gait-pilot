@@ -390,3 +390,86 @@ treated as sagittal, which is what they were.
 as a blocker-level recording problem, because the two measures it adds do not
 come close to replacing the six it costs.
 
+
+## 19. Phones skip frames, and the frame count cannot see it — *fixed in ALGO_VERSION 0.4.0*
+
+A phone does not deliver a frame every 1/60 s. When the scene is dim it
+cannot expose each frame in time, so it skips some and writes nothing where
+they would have been. The container then reports an *average* frame rate. On
+the garage pilot clips, nominally 60 fps, that average ranged from 43 to 57
+fps: 2.7–28% of frames were never recorded, in bursts of up to 7.
+
+Until 0.4.0 the pipeline counted decoded frames at that average rate. Over a
+whole clip that is correct; inside it, it is wrong everywhere the skips cluster.
+Measured against the camera's own timestamps it misplaced events by up to
+1.8 s and mis-timed individual strides by 5–20% — several times the
+stride-time variability being measured. On a metronome-paced walk, where true
+variability is near zero, it reported a stride-time CV of **11.8%**, above the
+5% line this tool treats as high fall risk.
+
+**The fix.** Every frame carries a timestamp from the camera. The nominal frame
+interval is measured from those timestamps (not assumed: several pilot phones
+shoot at 59.94, and treating that as 60 misplaces a frame every 16 seconds),
+each decoded frame is placed on its true row, and each skipped frame becomes a
+NaN row — the representation already used for a briefly hidden foot. Short
+gaps are filled; gaps longer than `landmarks.max_interpolation_gap_frames`
+split the clip, exactly as a long occlusion does.
+
+Metronome clips, same landmarks, old clock vs rebuilt clock:
+
+| clip | frames skipped | stride CV before → after | cadence (truth) |
+| --- | --- | --- | --- |
+| 100 steps/min | 28.0% | 11.8% → **1.9%** | 99.8 (100) |
+| 80 steps/min | 19.8% | 6.2% → **3.9%** | 81.5 (80) |
+| 60 steps/min | 5.2% | 7.3% → **4.1%** | 57.8 (60) |
+
+The free walks matter more, because they are what the tool will actually see.
+At skip rates of only 2.6–8.9%, the old clock put all four healthy walks above
+the 3% "moderate risk" line for stride-time CV, and one above 5%:
+
+| clip | frames skipped | stride CV before → after |
+| --- | --- | --- |
+| walk 1 | 6.2% | 4.5% → **1.7%** |
+| walk 2 | 2.6% | 4.6% → **1.5%** |
+| walk 3 | 5.3% | 3.8% → **1.4%** |
+| walk 4 | 8.9% | 6.3% → **2.7%** |
+
+Cadence and double support barely move, being averages. Clips that skipped
+nothing are unchanged: all eight earlier pilot clips reproduce their previous
+results to within 0.1.
+
+**Skipped frames are not treated as tracking failures.** The per-event
+confidence gate rejects a stride when the foot was not observed around its
+heel strike, because a hidden foot is still reported — guessed — and the guess
+is confidently wrong. A skipped frame is different: the samples either side are
+genuine, and a few missing frames of a signal with nothing above 6 Hz fill
+almost exactly. On the metronome clips the strides the gate would have rejected
+for skipped frames alone matched the metronome as well as the rest, and
+rejecting them cost up to a quarter of the usable strides. They are still drawn
+hollow in the annotated video, because nothing was measured there.
+
+**Residual error.** The camera's own capture times jitter by a few
+milliseconds, so no uniform grid fits them exactly; each frame is placed within
+half a frame interval (8 ms at 60 fps) of when it was captured. That is small
+next to a 25–35 ms stride-time standard deviation.
+
+**Thresholds.** Skipped frames are mentioned on the report above 2% and mark
+stride-time variability low-confidence above 30%, just above the heaviest clip
+validated (28%). Beyond that nothing has been tested.
+
+**Not reproduced: heel-strike detection firing late.** The review that found
+this bug also reported, from 24 hand-labelled heel strikes on the 60 steps/min
+clip, that about 30% fired 8 or more frames late. Two independent checks do not
+reproduce it. Against the moment the heel landmark itself stops moving, Zeni
+heel strikes land within about a frame on all three metronome clips, with 0–5%
+late by 8+ frames. And MediaPipe's own temporal smoothing, which a person
+watching the video would see but a landmark-based check would not, delays the
+heel landmark by about one frame against per-frame detection — a near-constant
+bias, not a miss. Neither check can rule out the tracker placing the heel
+wrongly in the first place, which only labels made by eye can test. The labels
+behind the original finding should be compared against the current detector
+directly before this is either fixed or dismissed.
+
+**Stored sessions from before 0.4.0** on clips that skipped frames carry the
+distorted timing and must be reprocessed. Their raw landmarks were stored one
+row per decoded frame with no timestamps, so this needs the original video.

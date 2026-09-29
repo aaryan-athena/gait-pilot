@@ -60,7 +60,7 @@ def fill_short_gaps(series: PixelSeries, cfg: Config) -> tuple[PixelSeries, dict
 
     out = PixelSeries(
         t=series.t, xy=xy, visibility=series.visibility,
-        valid=series.valid.copy(), video=series.video,
+        valid=series.valid.copy(), video=series.video, camera_gap=series.camera_gap,
     )
     return out, {"samples_interpolated": filled, "samples_left_missing": left_open}
 

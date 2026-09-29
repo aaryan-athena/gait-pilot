@@ -93,6 +93,14 @@ class OverlayResult:
     note: Optional[str] = None
 
 
+def _decoded_rows(extraction, n_rows: int) -> np.ndarray:
+    """Grid row of each decoded frame; identity when nothing was dropped."""
+    raw = getattr(extraction, "raw", None)
+    if raw is None or getattr(raw, "observed", None) is None:
+        return np.arange(n_rows)
+    return raw.frame_rows
+
+
 def render_overlay_video(
     extraction,
     analysis,
@@ -125,23 +133,43 @@ def render_overlay_video(
                           crf=int(section["crf"]))
     frames_written = 0
 
+    # The n-th decoded image is not row n when the camera skipped frames, so
+    # every image is drawn at its own row. A skipped row re-shows the previous
+    # image with that row's skeleton -- interpolated, so drawn hollow -- which
+    # keeps playback in real time and shows exactly what the analysis used.
+    rows = _decoded_rows(extraction, series.n_frames)
+
     capture = cv2.VideoCapture(str(info.path))
     try:
-        index = 0
-        while True:
+        decoded = 0
+        next_row = 0
+        previous: Optional[np.ndarray] = None
+        while decoded < rows.size:
             ok, frame = capture.read()
-            if not ok or index >= series.n_frames:
+            if not ok:
+                break
+            row = int(rows[decoded])
+            decoded += 1
+            if row >= series.n_frames:
                 break
             if scale != 1.0:
                 frame = cv2.resize(frame, (out_w, out_h),
                                    interpolation=cv2.INTER_AREA)
-            _draw_frame(frame, series, index, scale, events_by_frame,
+            if previous is not None:
+                for gap_row in range(next_row, row):
+                    held = previous.copy()
+                    _draw_frame(held, series, gap_row, scale, events_by_frame,
+                                cycle_spans, analysis, info)
+                    writer.write(held)
+                    frames_written += 1
+            previous = frame.copy()
+            _draw_frame(frame, series, row, scale, events_by_frame,
                         cycle_spans, analysis, info)
             writer.write(frame)
             frames_written += 1
-            index += 1
-            if progress is not None and index % 30 == 0:
-                progress(index)
+            next_row = row + 1
+            if progress is not None and decoded % 30 == 0:
+                progress(decoded)
     finally:
         capture.release()
         result = writer.close()

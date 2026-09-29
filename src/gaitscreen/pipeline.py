@@ -110,6 +110,29 @@ def extract_session(
             note="camera-motion check skipped",
         )
 
+    return extraction_from_raw(raw, cfg, motion=motion, calibration=calibration)
+
+
+def extraction_from_raw(
+    raw: RawLandmarks,
+    cfg: Config,
+    *,
+    motion: Optional[CameraMotion] = None,
+    calibration: Optional[Calibration] = None,
+) -> Extraction:
+    """Everything in stage 1 after pose estimation.
+
+    Split out so stored landmarks can be re-run under a new algorithm without
+    repeating the slow part, and so a change to the time base can be compared
+    against the old one on identical landmarks.
+    """
+    info = raw.video
+    if motion is None:
+        motion = CameraMotion(
+            net_px=0.0, path_px=0.0, determinate=False, n_samples=0,
+            note="camera-motion check skipped",
+        )
+
     series = to_pixels(raw, cfg)
     series, gap_summary = resample.fill_short_gaps(series, cfg)
     series = filters.smooth_series(series, cfg)
@@ -260,6 +283,9 @@ def persist_session(
         "video": {
             "path": str(info.path), "width": info.width, "height": info.height,
             "fps": info.fps, "n_frames": info.n_frames, "warnings": info.warnings,
+            "container_fps": info.container_fps,
+            "dropped_frames": info.dropped_frames,
+            "max_gap_frames": info.max_gap_frames,
         },
         "cycle_summary": result.analysis.cycle_summary,
         "range_of_motion": result.analysis.range_of_motion,

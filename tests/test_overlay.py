@@ -376,3 +376,36 @@ def test_write_to_a_dead_encoder_explains_itself():
     with pytest.raises(RuntimeError) as excinfo:
         writer.write(np.zeros((4, 4, 3), np.uint8))
     assert "height not divisible by 2" in str(excinfo.value)
+
+
+@needs_ffmpeg
+def test_skipped_frames_keep_playback_in_real_time(cfg, tmp_path):
+    """The file holds fewer images than the analysis has rows.
+
+    Walking the file one image per row would pull every later event forward by
+    the number of frames skipped so far -- on the 28%-skipped pilot clip, well
+    over a second by the end -- and play the walk back fast. Each image goes on
+    its own row, and a skipped row re-shows the previous image.
+    """
+    extraction, _ = build_extraction(cfg, fps=30.0, n_strides=4,
+                                     leg_length_px=200, width=640, height=360,
+                                     in_place=True)
+    n = extraction.series.n_frames
+    observed = np.ones(n, dtype=bool)
+    observed[5:8] = False
+    observed[40:42] = False
+    extraction.raw.observed = observed
+
+    path = tmp_path / "source.mp4"
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 30.0,
+                             (640, 360))
+    for _ in range(int(observed.sum())):
+        writer.write(np.full((360, 640, 3), 128, dtype=np.uint8))
+    writer.release()
+    extraction.info.path = path
+
+    out = tmp_path / "overlay.mp4"
+    result = render_overlay_video(extraction, analyse(extraction, cfg), out, cfg)
+
+    assert result.n_frames == n
+    assert _probe(out)["frames"] == n

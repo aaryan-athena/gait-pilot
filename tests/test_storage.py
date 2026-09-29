@@ -200,3 +200,63 @@ def test_an_existing_database_gains_new_columns_without_losing_data(tmp_path):
     assert row["cadence_spm"] == 100
     assert row["view_kind"] is None
     conn.close()
+
+
+def test_skipped_frame_rows_survive_the_archive(tmp_path):
+    """Reprocessing must know which rows were real frames.
+
+    Without the mask a re-run would treat every row the camera skipped as a
+    frame where the tracker failed, and the overlay could not line its rows up
+    with the video file.
+    """
+    from gaitscreen.pose.schema import N_LANDMARKS
+    from gaitscreen.types import RawLandmarks, VideoInfo
+
+    n = 50
+    observed = np.ones(n, dtype=bool)
+    observed[[10, 11, 30]] = False
+    raw = RawLandmarks(
+        t=np.arange(n) / 60.0,
+        xy=np.random.default_rng(0).uniform(size=(n, N_LANDMARKS, 2)),
+        z=np.zeros((n, N_LANDMARKS)),
+        visibility=np.full((n, N_LANDMARKS), 0.9),
+        detected=observed.copy(),
+        video=VideoInfo(path="x.mp4", width=640, height=480, fps=60.0, n_frames=n),
+        observed=observed,
+    )
+    artifacts = SessionArtifacts(tmp_path, "u1", "sess1")
+    artifacts.save_meta({"video": {"path": "x.mp4", "width": 640, "height": 480,
+                                   "fps": 60.0, "dropped_frames": 3}})
+    artifacts.save_raw_landmarks(raw)
+
+    restored = artifacts.load_raw_landmarks()
+    assert restored.observed.tolist() == observed.tolist()
+    assert restored.frame_rows.tolist() == np.flatnonzero(observed).tolist()
+    assert restored.video.dropped_frames == 3
+    assert restored.detection_rate == 1.0
+
+
+def test_archives_from_before_timing_was_rebuilt_still_load(tmp_path):
+    """Every row of an old archive is a decoded frame."""
+    import pandas as pd
+
+    from gaitscreen.pose.schema import N_LANDMARKS
+    from gaitscreen.types import RawLandmarks, VideoInfo
+
+    n = 20
+    raw = RawLandmarks(
+        t=np.arange(n) / 30.0, xy=np.zeros((n, N_LANDMARKS, 2)),
+        z=np.zeros((n, N_LANDMARKS)), visibility=np.ones((n, N_LANDMARKS)),
+        detected=np.ones(n, dtype=bool),
+        video=VideoInfo(path="x.mp4", width=640, height=480, fps=30.0, n_frames=n),
+    )
+    artifacts = SessionArtifacts(tmp_path, "u1", "sess1")
+    artifacts.save_meta({"video": {"path": "x.mp4", "width": 640, "height": 480,
+                                   "fps": 30.0}})
+    path = artifacts.save_raw_landmarks(raw)
+    frame = pd.read_parquet(path).drop(columns=["observed"])
+    frame.to_parquet(path, index=False)
+
+    restored = artifacts.load_raw_landmarks()
+    assert restored.observed is None
+    assert restored.frame_rows.tolist() == list(range(n))

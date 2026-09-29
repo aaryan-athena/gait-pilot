@@ -85,7 +85,12 @@ class RecordingReport:
 
 def diagnose(extraction, analysis, cfg: Config) -> RecordingReport:
     """Inspect a recording and report actionable problems with it."""
-    section = cfg.section("diagnostics")
+    # The dropped-frame thresholds live under ``video`` beside the rest of the
+    # timing settings; they are carried in here rather than duplicated.
+    section = cfg.section("diagnostics").with_overrides({
+        key: cfg[f"video.{key}"]
+        for key in ("timing_warn_drop_rate_pct", "timing_lowconf_drop_rate_pct")
+    })
     series = extraction.series
     raw = extraction.raw
     leg_px = leg_length_px(series)
@@ -110,6 +115,7 @@ def diagnose(extraction, analysis, cfg: Config) -> RecordingReport:
         _check_camera_shake,
         _check_walk_length,
         _check_frame_rate,
+        _check_dropped_frames,
     )
 
     found: list[Diagnostic] = []
@@ -560,6 +566,46 @@ def _check_walk_length(extraction, analysis, series, raw, leg_px, cfg, out):
             "comparison trustworthy."
         ),
         measured={"strides_valid": n_valid, "strides_needed": needed},
+    )
+
+
+def _check_dropped_frames(extraction, analysis, series, raw, leg_px, cfg, out):
+    """The camera skipped frames -- almost always because the scene was dim.
+
+    The timing is already corrected for this (see pose/landmarker.py), so this
+    is not a warning that the numbers are wrong. It is here because the cause
+    is easy to fix at the next recording and the effect accumulates: every
+    skipped frame is a sample filled in rather than measured, and stride-time
+    variability is marked low-confidence above the configured share.
+    """
+    info = series.video
+    rate = info.drop_rate_pct
+    out["dropped_frames"] = info.dropped_frames
+    out["drop_rate_pct"] = rate
+    out["max_gap_frames"] = info.max_gap_frames
+    if rate < float(cfg["timing_warn_drop_rate_pct"]):
+        return None
+
+    heavy = rate >= float(cfg["timing_lowconf_drop_rate_pct"])
+    return Diagnostic(
+        code="camera_dropped_frames",
+        severity="major" if heavy else "minor",
+        title="The camera skipped frames",
+        detail=(
+            f"The camera delivered no picture for {info.dropped_frames} frames "
+            f"({rate:.0f}% of the recording). Phones do this when there is not "
+            "enough light to expose each frame in time. Timing was rebuilt "
+            "from the camera's own clock, so the measurements are not stretched "
+            "or squashed, but the missing moments had to be filled in"
+            + (", and step-to-step variability is marked as less reliable."
+               if heavy else ".")
+        ),
+        fix=(
+            "Record in brighter light: turn on the room lights or film in "
+            "daylight. If the phone has a low-light or night mode for video, "
+            "turn it off, since it lowers the frame rate on purpose."
+        ),
+        measured={"drop_rate_pct": rate, "dropped_frames": info.dropped_frames},
     )
 
 

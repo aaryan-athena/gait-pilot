@@ -32,6 +32,21 @@ video:
   fps_variability_min: 50
   min_frame_height: 360
   max_frames: 0 # 0 = no limit
+  # Timing integrity. Phones skip frames in dim light and record nothing where
+  # they would have been; the pipeline rebuilds the clock from the camera's own
+  # timestamps and puts a NaN row in each gap (see pose/landmarker.py). These
+  # only decide how loudly to say so. Pilot footage: 0.0-2.1% on the earlier
+  # clips, 2.7-28% on the garage clips.
+  # Mention the skipped frames on the report above this share of the clip.
+  timing_warn_drop_rate_pct: 2.0
+  # Mark stride-time variability low-confidence above this share. Set from the
+  # metronome clips rather than guessed: with the clock rebuilt, the heaviest
+  # (28% skipped) matched its metronome to a median 13 ms per stride -- the
+  # best of the three -- so skipped frames up to that level are measured, not
+  # suspected. Above it nothing has been tested. A lower figure (5% was first
+  # proposed) would flag six of the seven garage clips for a problem the data
+  # shows they do not have, and a warning that is always on gets ignored.
+  timing_lowconf_drop_rate_pct: 30.0
 
 landmarks:
   # MediaPipe `visibility` is not a calibrated probability; treat as a soft

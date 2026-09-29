@@ -47,6 +47,7 @@ def to_pixels(raw: RawLandmarks, cfg: Config) -> PixelSeries:
         visibility=raw.visibility.copy(),
         valid=valid,
         video=raw.video,
+        camera_gap=None if raw.observed is None else ~raw.observed,
     )
 
 

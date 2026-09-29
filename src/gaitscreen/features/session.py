@@ -160,7 +160,8 @@ def analyse(extraction, cfg: Config) -> SessionAnalysis:
     metrics.n_strides_total = summary["n_total"]
     metrics.n_strides_valid = summary["n_valid"]
 
-    _fill_temporal(metrics, all_events, all_cycles, cfg, series.fps, notes)
+    _fill_temporal(metrics, all_events, all_cycles, cfg, series.fps, notes,
+                   drop_rate_pct=series.video.drop_rate_pct)
     _fill_spatial(metrics, extraction, series, all_events, all_cycles, passes,
                   cfg, camera_side, notes)
     _fill_trunk(metrics, series, all_cycles, passes, notes)
@@ -319,9 +320,12 @@ def _check_limb_interleaving(
 # metric groups
 # --------------------------------------------------------------------------
 def _fill_temporal(
-    metrics: SessionMetrics, events, cycles, cfg: Config, fps: float, notes: list[str]
+    metrics: SessionMetrics, events, cycles, cfg: Config, fps: float, notes: list[str],
+    *, drop_rate_pct: float = 0.0,
 ) -> None:
-    result = variability_module.stride_time_variability(cycles, cfg, fps)
+    result = variability_module.stride_time_variability(
+        cycles, cfg, fps, drop_rate_pct=drop_rate_pct
+    )
     metrics.stride_time_mean_s = result.mean_s
     metrics.stride_time_sd_s = result.sd_s
     if result.cv_pct is None:

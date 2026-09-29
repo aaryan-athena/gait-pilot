@@ -42,9 +42,15 @@ class VariabilityResult:
 
 
 def stride_time_variability(
-    cycles: list[GaitCycle], cfg: Config, fps: float
+    cycles: list[GaitCycle], cfg: Config, fps: float, drop_rate_pct: float = 0.0
 ) -> VariabilityResult:
-    """Coefficient of variation of stride time, with both gates applied."""
+    """Coefficient of variation of stride time, with all gates applied.
+
+    ``drop_rate_pct`` is the share of frames the camera skipped. It no longer
+    biases the CV -- the clock is rebuilt from the camera's timestamps -- but
+    every skipped frame is a filled-in sample, and this is the metric most
+    sensitive to where an event lands, so a heavily reconstructed clip says so.
+    """
     per_side = stride_times(cycles)
     n_total = sum(v.size for v in per_side.values())
     minimum = int(cfg["features.min_strides_for_cv"])
@@ -90,6 +96,15 @@ def stride_time_variability(
             f"deviation itself ({(sd_s or 0) * 1000:.0f} ms here). Treat this figure "
             f"as indicative and record at {variability_min:g} fps for a reliable one."
         )
+
+    if drop_rate_pct >= float(cfg["video.timing_lowconf_drop_rate_pct"]):
+        drop_note = (
+            f"the camera skipped {drop_rate_pct:.0f}% of this recording's frames. "
+            "Timing was rebuilt from the camera's own clock and the gaps filled "
+            "in, but this figure is the one most sensitive to that, so treat it "
+            "as indicative and record in brighter light for a reliable one."
+        )
+        low_confidence = f"{low_confidence} {drop_note}" if low_confidence else drop_note
 
     return VariabilityResult(
         cv_pct=cv, mean_s=mean_s, sd_s=sd_s, n_strides=n_total,

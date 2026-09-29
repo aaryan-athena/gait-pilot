@@ -14,7 +14,7 @@ Bump MINOR for changes that alter output values; bump PATCH for changes that
 cannot (logging, reporting, docstrings).
 """
 
-ALGO_VERSION = "0.3.0"
+ALGO_VERSION = "0.4.0"
 
 # Human-readable note on what defines this version's measurement, surfaced in
 # reports so a caregiver can see when the yardstick changed.
@@ -28,6 +28,16 @@ ALGO_NOTES = (
 #: What changed, and why a stored session from an earlier version is not
 #: comparable to one from this version without reprocessing.
 ALGO_CHANGELOG = {
+    "0.4.0": (
+        "The clock is rebuilt from the camera's own frame timestamps. Phones "
+        "skip frames in dim light and the old clock counted the frames that "
+        "were kept as if evenly spaced, which mis-timed individual strides by "
+        "5-20% on the garage pilot clips and reported a stride-time CV of "
+        "11.8% for a metronome-paced walk whose true value is near 2%. Any "
+        "session from a clip that skipped frames has different timing metrics "
+        "under this version and must be reprocessed from the original video; "
+        "clips that skipped nothing are unchanged."
+    ),
     "0.3.0": (
         "Recordings filmed towards the camera are now identified and measured "
         "separately, instead of being run through the sagittal pipeline as if "

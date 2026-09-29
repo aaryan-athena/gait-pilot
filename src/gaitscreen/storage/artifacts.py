@@ -85,6 +85,11 @@ class SessionArtifacts:
         )  # (n, 33, 4)
         frame = pd.DataFrame(block.reshape(n, -1), columns=_LANDMARK_COLUMNS)
         frame.insert(0, "detected", raw.detected)
+        # Which rows are real frames and which stand in for frames the camera
+        # skipped. Without it a reprocessed session would re-run its gap
+        # rows as if they were undetected poses, and the overlay could not
+        # line its rows up with the video file.
+        frame.insert(0, "observed", raw.observed_mask)
         frame.insert(0, "t", raw.t)
         frame.insert(0, "frame", np.arange(n))
         frame.to_parquet(self.landmarks_path, index=False)
@@ -105,8 +110,16 @@ class SessionArtifacts:
                 fps=float(meta["fps"]),
                 n_frames=n,
                 warnings=list(meta.get("warnings", [])),
+                container_fps=meta.get("container_fps"),
+                dropped_frames=int(meta.get("dropped_frames", 0) or 0),
+                max_gap_frames=int(meta.get("max_gap_frames", 0) or 0),
             )
 
+        # Archives written before timing was rebuilt have no such column;
+        # every row in them is a decoded frame.
+        observed = (
+            frame["observed"].to_numpy(dtype=bool) if "observed" in frame else None
+        )
         return RawLandmarks(
             t=frame["t"].to_numpy(dtype=float),
             xy=block[:, :, 0:2],
@@ -114,6 +127,7 @@ class SessionArtifacts:
             visibility=block[:, :, 3],
             detected=frame["detected"].to_numpy(dtype=bool),
             video=video,
+            observed=observed,
         )
 
     # -- angle curves ----------------------------------------------------

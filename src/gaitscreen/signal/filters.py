@@ -82,7 +82,7 @@ def smooth_series(series: PixelSeries, cfg: Config) -> PixelSeries:
 
     return PixelSeries(
         t=series.t, xy=xy, visibility=series.visibility,
-        valid=series.valid, video=series.video,
+        valid=series.valid, video=series.video, camera_gap=series.camera_gap,
     )
 
 

@@ -92,7 +92,26 @@ def fps_warnings(fps: float, cfg: Config) -> list[str]:
 def frames(
     path: str | Path, *, max_frames: int = 0, to_rgb: bool = False
 ) -> Iterator[tuple[int, np.ndarray]]:
-    """Yield ``(frame_index, image)`` pairs. Images are BGR unless ``to_rgb``."""
+    """Yield ``(frame_index, image)`` pairs. Images are BGR unless ``to_rgb``.
+
+    ``frame_index`` counts decoded frames. On a clip where the camera dropped
+    frames that is not the row in the landmark grid; see
+    :attr:`RawLandmarks.frame_rows`.
+    """
+    for index, image, _ in timed_frames(path, max_frames=max_frames, to_rgb=to_rgb):
+        yield index, image
+
+
+def timed_frames(
+    path: str | Path, *, max_frames: int = 0, to_rgb: bool = False
+) -> Iterator[tuple[int, np.ndarray, float]]:
+    """Yield ``(frame_index, image, timestamp_ms)`` for every decoded frame.
+
+    The timestamp is the one the camera stamped on the frame, read straight
+    after decoding it. It is the only record of *when* a frame was captured:
+    the frame count cannot say, because a phone in dim light skips frames and
+    writes nothing where they would have been.
+    """
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
         raise ValueError(f"could not open video: {path}")
@@ -104,10 +123,140 @@ def frames(
                 break
             if max_frames and index >= max_frames:
                 break
-            yield index, (cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) if to_rgb else frame)
+            ts_ms = float(cap.get(cv2.CAP_PROP_POS_MSEC))
+            yield index, (
+                cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) if to_rgb else frame
+            ), ts_ms
             index += 1
     finally:
         cap.release()
+
+
+# --------------------------------------------------------------------------
+# Timing integrity
+# --------------------------------------------------------------------------
+@dataclass
+class FrameGrid:
+    """Where each decoded frame belongs on the camera's nominal frame grid."""
+
+    rows: np.ndarray  # (n_decoded,) int, strictly increasing, rows[0] == 0
+    fps: float  # nominal grid rate, e.g. 59.94 -- not the container average
+    from_timestamps: bool  # False if the timestamps were unusable
+
+    @property
+    def n_rows(self) -> int:
+        return int(self.rows[-1]) + 1 if self.rows.size else 0
+
+    @property
+    def dropped(self) -> int:
+        return self.n_rows - int(self.rows.size)
+
+    @property
+    def max_gap(self) -> int:
+        return int(np.max(np.diff(self.rows)) - 1) if self.rows.size > 1 else 0
+
+
+def nominal_interval_ms(timestamps_ms: np.ndarray) -> Optional[float]:
+    """The camera's nominal frame interval, measured from its own timestamps.
+
+    Not the container's frame rate, for two reasons. On a variable-rate phone
+    clip the container reports the *average* rate -- 43.2 fps on a pilot clip
+    shot at 60 -- which is the one number guaranteed to be wrong for every
+    individual frame. And the nominal rate cannot be assumed either: many
+    phones shoot at 59.94, and treating that as 60 misplaces a frame every
+    sixteen seconds, which over a minute-long walk is a clock error larger than
+    the stride-time variability being measured.
+
+    Two stages. The commonest interval gives a coarse value: skipped frames
+    only ever lengthen an interval, so as long as most frames arrived the
+    nominal interval is the mode. (Not the minimum, nor the shortest few: with
+    timestamp jitter the shortest intervals are the nominal one minus the
+    jitter, and a grid built on them invents skipped frames everywhere.) Then
+    it is refined by least squares against the absolute timestamps, which
+    averages the jitter out over the whole clip and resolves 59.94 from 60.
+    """
+    ts = np.asarray(timestamps_ms, dtype=float)
+    deltas = np.diff(ts)
+    deltas = deltas[np.isfinite(deltas) & (deltas > 0)]
+    if deltas.size < 10:
+        return None
+
+    candidates = np.quantile(deltas, np.linspace(0.02, 0.6, 59))
+    support = [np.count_nonzero(np.abs(deltas - c) <= 0.15 * c) for c in candidates]
+    mode = float(candidates[int(np.argmax(support))])
+    # Every candidate near the mode scores alike, so the winner can sit a few
+    # percent off it. The median of the cluster it picks out does not.
+    interval = float(np.median(deltas[np.abs(deltas - mode) <= 0.25 * mode]))
+
+    # A 1% error in the interval puts a frame on the wrong row every hundred
+    # frames, and a least-squares fit over rows assigned with that error just
+    # reproduces it. So the fit starts over the first stretch of the clip,
+    # where the coarse value is still good enough to count frames, and extends.
+    elapsed = ts - ts[0]
+    for share in (0.05, 0.2, 0.5, 1.0):
+        span = elapsed[: max(10, int(share * elapsed.size))]
+        steps = np.round(span / interval)
+        if not np.any(steps):
+            return None
+        interval = float(np.dot(steps, span) / np.dot(steps, steps))
+    return interval
+
+
+def frame_grid(
+    timestamps_ms: np.ndarray, container_fps: float, *, max_drop_fraction: float = 0.6
+) -> FrameGrid:
+    """Place each decoded frame on the nominal grid by its timestamp.
+
+    Pure function, so the arithmetic is testable without a video file. Frames
+    the camera skipped show up as rows no decoded frame lands on.
+
+    Falls back to one row per decoded frame at the container rate -- exactly
+    what the pipeline assumed before -- when the timestamps cannot be used: a
+    backend that reports zeros, time running backwards, or a grid that would
+    claim most of the clip is missing. A fallback can under-report drops but
+    never invent them.
+    """
+    ts = np.asarray(timestamps_ms, dtype=float)
+    n = ts.size
+
+    def uniform() -> FrameGrid:
+        return FrameGrid(rows=np.arange(n), fps=float(container_fps),
+                         from_timestamps=False)
+
+    if n < 2 or not np.all(np.isfinite(ts)) or np.any(np.diff(ts) <= 0):
+        return uniform()
+    interval = nominal_interval_ms(ts)
+    if interval is None or interval <= 0:
+        return uniform()
+
+    rows = np.round((ts - ts[0]) / interval).astype(int)
+    # Jitter larger than half an interval could put two frames on one row.
+    # Keep order, and push the later one to the next free row.
+    for i in range(1, n):
+        if rows[i] <= rows[i - 1]:
+            rows[i] = rows[i - 1] + 1
+
+    grid = FrameGrid(rows=rows, fps=1000.0 / interval, from_timestamps=True)
+    if grid.dropped > max_drop_fraction * grid.n_rows:
+        return uniform()
+    return grid
+
+
+def describe_drops(info: VideoInfo, cfg: Config) -> list[str]:
+    """Plain-language warning for camera-dropped frames, if worth one."""
+    if info.dropped_frames <= 0:
+        return []
+    rate = info.drop_rate_pct
+    if rate < float(cfg["video.timing_warn_drop_rate_pct"]):
+        return []
+    longest_ms = info.max_gap_frames * 1000.0 / info.fps if info.fps else 0.0
+    return [
+        f"the camera skipped {info.dropped_frames} frames ({rate:.1f}% of the "
+        f"recording, longest gap {longest_ms:.0f} ms) -- usually a sign of dim "
+        "light. Timing was rebuilt from the camera's own timestamps, so stride "
+        "times are measured on the real clock; the skipped frames were filled "
+        "in the same way as a briefly hidden ankle."
+    ]
 
 
 # --------------------------------------------------------------------------

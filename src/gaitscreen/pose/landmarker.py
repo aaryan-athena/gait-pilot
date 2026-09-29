@@ -139,15 +139,24 @@ def extract(
     z_rows: list[np.ndarray] = []
     vis_rows: list[np.ndarray] = []
     detected: list[bool] = []
+    stamps: list[float] = []
 
     nan_xy = np.full((N_LANDMARKS, 2), np.nan)
     nan_1d = np.full(N_LANDMARKS, np.nan)
 
     with PoseLandmarker.create_from_options(options) as landmarker:
         last_ts = -1
-        for index, rgb in video_io.frames(info.path, max_frames=max_frames, to_rgb=True):
-            # VIDEO mode requires strictly increasing integer millisecond stamps.
-            ts_ms = max(int(round(index * 1000.0 / info.fps)), last_ts + 1)
+        for index, rgb, stamp_ms in video_io.timed_frames(
+            info.path, max_frames=max_frames, to_rgb=True
+        ):
+            stamps.append(stamp_ms)
+            # VIDEO mode requires strictly increasing integer millisecond
+            # stamps. The camera's own are used where they are sane, so the
+            # tracker's temporal smoothing sees the real spacing of frames.
+            if np.isfinite(stamp_ms) and stamp_ms > 0:
+                ts_ms = max(int(round(stamp_ms)), last_ts + 1)
+            else:
+                ts_ms = max(int(round(index * 1000.0 / info.fps)), last_ts + 1)
             last_ts = ts_ms
 
             result = landmarker.detect_for_video(
@@ -168,20 +177,76 @@ def extract(
             if progress is not None and index % 25 == 0:
                 progress(index)
 
-    n = len(xy_rows)
-    if n == 0:
+    if not xy_rows:
         raise ValueError(f"no frames could be read from {info.path}")
 
-    # Trust the frames we actually read over the container's frame count.
+    return place_on_grid(
+        info, cfg, np.asarray(stamps, dtype=float),
+        np.stack(xy_rows), np.stack(z_rows), np.stack(vis_rows),
+        np.array(detected, dtype=bool),
+    )
+
+
+def place_on_grid(
+    info: VideoInfo,
+    cfg: Config,
+    stamps_ms: np.ndarray,
+    xy: np.ndarray,
+    z: np.ndarray,
+    visibility: np.ndarray,
+    detected: np.ndarray,
+) -> RawLandmarks:
+    """Put per-decoded-frame landmarks onto the camera's true frame grid.
+
+    This is the timing-integrity fix. A phone does not deliver every frame: in
+    dim light it skips them -- up to 28% on the pilot metronome clips -- and
+    the file simply has nothing where they would have been. Counting decoded
+    frames as if they were evenly spaced then compresses time wherever the
+    skips cluster. On the pilot clips that misplaced events by up to 1.8 s and
+    mis-timed individual strides by 5-20%, several times the stride-time
+    variability the tool exists to detect.
+
+    Each skipped frame becomes a NaN row -- the "frame exists, nothing seen"
+    representation the pipeline already uses for occlusion -- so short gaps are
+    interpolated, long ones split the clip into segments, and every consumer of
+    ``t`` is correct without being changed.
+
+    Separate from :func:`extract` so it can be tested, and so stored
+    per-decoded-frame landmarks could be re-gridded, without pose estimation.
+    """
+    container_fps = float(info.fps)
+    grid = video_io.frame_grid(stamps_ms, container_fps)
+    n = grid.n_rows
+
+    def spread(values: np.ndarray, fill) -> np.ndarray:
+        out = np.full((n, *values.shape[1:]), fill, dtype=values.dtype)
+        out[grid.rows] = values
+        return out
+
+    observed = np.zeros(n, dtype=bool)
+    observed[grid.rows] = True
+
+    # The container's average rate produced the fps warnings in probe(); on a
+    # variable-rate clip those describe a frame rate the camera never ran at.
+    # Replace them with warnings about the real grid rate.
+    stale = set(video_io.fps_warnings(container_fps, cfg))
+    info.warnings = [w for w in info.warnings if w not in stale]
+    info.container_fps = container_fps
+    info.fps = grid.fps
     info.n_frames = n
+    info.dropped_frames = grid.dropped
+    info.max_gap_frames = grid.max_gap
+    info.warnings.extend(video_io.fps_warnings(grid.fps, cfg))
+    info.warnings.extend(video_io.describe_drops(info, cfg))
 
     return RawLandmarks(
         t=np.arange(n, dtype=float) / info.fps,
-        xy=np.stack(xy_rows),
-        z=np.stack(z_rows),
-        visibility=np.stack(vis_rows),
-        detected=np.array(detected, dtype=bool),
+        xy=spread(xy, np.nan),
+        z=spread(z, np.nan),
+        visibility=spread(visibility, 0.0),
+        detected=spread(detected, False),
         video=info,
+        observed=observed,
     )
 
 
@@ -194,7 +259,9 @@ def subject_boxes(
     """
     width, height = raw.video.width, raw.video.height
     boxes: list[Optional[tuple[float, float, float, float]]] = []
-    for i in range(raw.n_frames):
+    # Indexed by decoded frame, because that is how the camera-motion check
+    # walks the file; rows for frames the camera dropped have no image.
+    for i in raw.frame_rows:
         if not raw.detected[i]:
             boxes.append(None)
             continue
