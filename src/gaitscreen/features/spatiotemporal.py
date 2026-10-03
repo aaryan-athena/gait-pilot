@@ -114,20 +114,36 @@ def step_measures(
     calibration exists; the left/right *ratio* needs no calibration at all.
     """
     measures = StepMeasures(leg_length_px=leg_length_px(series))
-    strikes = sorted(
-        (e for e in events if e.kind == "heel_strike" and _within_valid_cycle(e.t, cycles)),
-        key=lambda e: e.t,
-    )
 
-    for previous, current in zip(strikes, strikes[1:]):
-        if previous.side == current.side:
-            continue  # a contralateral strike was missed; this is not one step
-        measures.step_times_s[current.side].append(current.t - previous.t)
+    # Steps are only ever paired within one pass. Pooling every heel strike
+    # across the recording paired the last strike before a turn or a stop with
+    # the first one after it, and that 4-7 s gap entered the per-side mean as a
+    # single "step". cadence_spm survives the same pooling because its median
+    # guard drops the gap; this function had no guard, and on the garage pilot
+    # walks it reported step-time asymmetry of 22-99% for healthy walkers whose
+    # steps differ by 0.5-3%.
+    for strikes in _strikes_by_pass(events, cycles).values():
+        pairs = [
+            (previous, current) for previous, current in zip(strikes, strikes[1:])
+            # Same side twice means a contralateral strike was missed; the
+            # interval spans two steps and belongs to neither.
+            if previous.side != current.side
+        ]
+        if not pairs:
+            continue
+        # The same guard cadence_spm applies: an interval far from the pass's
+        # typical step is a missed or doubled event, not a step.
+        median = float(np.median([b.t - a.t for a, b in pairs]))
+        for previous, current in pairs:
+            interval = current.t - previous.t
+            if not 0.5 * median < interval < 1.8 * median:
+                continue
+            measures.step_times_s[current.side].append(interval)
 
-        direction = _direction_at(current.t, series, passes)
-        length = _heel_separation_px(series, current.t, current.side, direction)
-        if length is not None and np.isfinite(length):
-            measures.step_lengths_px[current.side].append(abs(length))
+            direction = _direction_at(current.t, series, passes)
+            length = _heel_separation_px(series, current.t, current.side, direction)
+            if length is not None and np.isfinite(length):
+                measures.step_lengths_px[current.side].append(abs(length))
 
     return measures
 
@@ -201,6 +217,22 @@ def gait_speed_mps(
 # --------------------------------------------------------------------------
 def _within_valid_cycle(t: float, cycles: list[GaitCycle]) -> bool:
     return any(c.valid and c.t_start <= t <= c.t_end for c in cycles)
+
+
+def _strikes_by_pass(
+    events: list[GaitEvent], cycles: list[GaitCycle]
+) -> dict[int, list[GaitEvent]]:
+    """Heel strikes inside valid cycles, grouped by pass and sorted in time."""
+    grouped: dict[int, list[GaitEvent]] = {}
+    for event in events:
+        if event.kind != "heel_strike":
+            continue
+        for cycle in cycles:
+            if cycle.valid and cycle.t_start <= event.t <= cycle.t_end:
+                grouped.setdefault(cycle.pass_index, []).append(event)
+                break
+    return {index: sorted(strikes, key=lambda e: e.t)
+            for index, strikes in grouped.items()}
 
 
 def _direction_at(t: float, series: PixelSeries, passes: list[WalkPass]) -> int:

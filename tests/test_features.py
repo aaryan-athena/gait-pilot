@@ -199,3 +199,69 @@ def test_no_passes_marks_everything_unavailable(cfg):
     assert all(
         reason for reason in result.metrics.unavailable.values()
     ), "every unavailable metric needs a stated reason"
+
+
+# --------------------------------------------------------------------------
+# steps never span a turn or a stop
+# --------------------------------------------------------------------------
+def _two_passes(gap_s, step_s=0.5, strikes_per_pass=8):
+    """Heel strikes, alternating sides, in two passes ``gap_s`` apart."""
+    from gaitscreen.types import GaitCycle, GaitEvent
+
+    events, cycles = [], []
+    for index, start in enumerate((1.0, 1.0 + strikes_per_pass * step_s + gap_s)):
+        times = [start + k * step_s for k in range(strikes_per_pass)]
+        sides = ["left", "right"] * (strikes_per_pass // 2)
+        events += [GaitEvent(t=t, kind="heel_strike", side=s, frame=0)
+                   for t, s in zip(times, sides)]
+        # One valid cycle per pass covering all its strikes.
+        cycles.append(GaitCycle(side="left", t_start=times[0], t_end=times[-1],
+                                start_frame=0, end_frame=0, pass_index=index))
+    return events, cycles
+
+
+def _step_measures(cfg, events, cycles):
+    from gaitscreen.features.spatiotemporal import step_measures
+
+    extraction, _ = build_extraction(cfg, fps=60.0, n_strides=4)
+    return step_measures(extraction.series, events, cycles, [])
+
+
+def test_a_turn_is_never_counted_as_a_step(cfg):
+    """The gap between passes is a turn or a stop, not a step.
+
+    Pooling strikes across passes put that 4-7 s gap into one side's mean
+    step time. On the garage pilot walks it reported step-time asymmetry of
+    22-99% for healthy walkers whose steps differ by 0.5-3%.
+    """
+    events, cycles = _two_passes(gap_s=5.0)
+    measures = _step_measures(cfg, events, cycles)
+
+    times = measures.all_step_times()
+    assert times.size == 14  # 7 steps in each pass, none across the gap
+    np.testing.assert_allclose(times, 0.5)
+
+
+def test_a_short_stop_is_not_a_step_either(cfg):
+    """A gap under the cadence guard's 1.8x cut-off would still leak through
+    if grouping by pass were left to the guard."""
+    events, cycles = _two_passes(gap_s=0.3)
+    times = _step_measures(cfg, events, cycles).all_step_times()
+    np.testing.assert_allclose(times, 0.5)
+
+
+def test_a_mistimed_strike_inside_a_pass_is_dropped(cfg):
+    """A wildly long interval within a pass is a missed or late event."""
+    events, cycles = _two_passes(gap_s=5.0)
+    events[3].t += 0.45  # a late strike: one 0.95 s step, then a 0.05 s one
+    times = _step_measures(cfg, events, cycles).all_step_times()
+    assert np.all((times > 0.25) & (times < 0.9))
+
+
+def test_step_time_asymmetry_is_symmetric_across_passes(cfg):
+    """End to end: a symmetric walk filmed in several passes stays symmetric."""
+    extraction, _ = build_extraction(cfg, fps=60.0, n_strides=16,
+                                     stride_time_cv=0.0)
+    metrics = analyse(extraction, cfg).metrics
+    assert metrics.step_time_asymmetry_pct is not None
+    assert metrics.step_time_asymmetry_pct < 5.0

@@ -14,7 +14,7 @@ Bump MINOR for changes that alter output values; bump PATCH for changes that
 cannot (logging, reporting, docstrings).
 """
 
-ALGO_VERSION = "0.4.0"
+ALGO_VERSION = "0.5.0"
 
 # Human-readable note on what defines this version's measurement, surfaced in
 # reports so a caregiver can see when the yardstick changed.
@@ -28,6 +28,15 @@ ALGO_NOTES = (
 #: What changed, and why a stored session from an earlier version is not
 #: comparable to one from this version without reprocessing.
 ALGO_CHANGELOG = {
+    "0.5.0": (
+        "Steps are paired only within one walking pass. Pooling every heel "
+        "strike across the recording paired the last strike before a turn or "
+        "stop with the first one after it, and that 4-7 s gap entered one "
+        "side's mean step time: the garage pilot walks stored step-time "
+        "asymmetry of 22-99% for healthy walkers, against 0.5-3% now. Step-"
+        "length asymmetry moves by up to 2 points for the same reason. "
+        "Cadence and stride-time variability are unchanged."
+    ),
     "0.4.0": (
         "The clock is rebuilt from the camera's own frame timestamps. Phones "
         "skip frames in dim light and the old clock counted the frames that "
