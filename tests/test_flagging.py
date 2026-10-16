@@ -312,3 +312,50 @@ def test_a_coronal_session_does_not_inherit_a_side_on_baseline(cfg):
 
     result = engine.evaluate(metrics, GOOD_QUALITY, history, cfg, view_kind="coronal")
     assert not result.baselines["cadence_spm"].available
+
+
+# --------------------------------------------------------------------------
+# left/right evenness needs evidence, not just a point estimate
+# --------------------------------------------------------------------------
+def test_evenness_bound_shrinks_a_noisy_difference():
+    """Eight noisy steps a side that happen to average 9% apart."""
+    from gaitscreen.features.asymmetry import asymmetry_lower_bound
+
+    rng = np.random.default_rng(3)
+    left = rng.normal(290, 22, 8)
+    right = left.mean() / 1.09 + rng.normal(0, 22, 8)
+    bound = asymmetry_lower_bound(left.tolist(), right.tolist())
+    assert bound is not None and bound < 8.0
+
+
+def test_evenness_bound_keeps_a_real_limp():
+    from gaitscreen.features.asymmetry import asymmetry_lower_bound
+
+    rng = np.random.default_rng(4)
+    left = rng.normal(320, 15, 10)
+    right = rng.normal(220, 15, 10)
+    assert asymmetry_lower_bound(left.tolist(), right.tolist()) > 15.0
+
+
+def test_noise_level_evenness_is_shown_but_not_flagged(cfg):
+    """The number is reported as measured; the flag waits for evidence."""
+    metrics = SessionMetrics(step_length_asymmetry_pct=11.4)
+    metrics.lower_bounds["step_length_asymmetry_pct"] = 4.0
+    assert not [f for f in absolute.evaluate(metrics, cfg)
+                if f.metric == "step_length_asymmetry_pct"]
+
+
+def test_well_supported_evenness_is_still_flagged(cfg):
+    metrics = SessionMetrics(step_length_asymmetry_pct=33.4)
+    metrics.lower_bounds["step_length_asymmetry_pct"] = 24.0
+    flags = [f for f in absolute.evaluate(metrics, cfg)
+             if f.metric == "step_length_asymmetry_pct"]
+    assert flags and flags[0].severity == "high"
+
+
+def test_a_floor_never_raises_a_flag_on_its_own(cfg):
+    """The floor can only hold a flag back, never create one."""
+    metrics = SessionMetrics(step_length_asymmetry_pct=5.0)
+    metrics.lower_bounds["step_length_asymmetry_pct"] = 20.0
+    assert not [f for f in absolute.evaluate(metrics, cfg)
+                if f.metric == "step_length_asymmetry_pct"]

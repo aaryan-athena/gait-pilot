@@ -1,6 +1,7 @@
 """Paths, resources and widgets shared across the app's views."""
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 from typing import Sequence
@@ -21,7 +22,7 @@ UPLOAD_DIR = PROJECT_ROOT / "data" / "uploads"
 
 #: Label, unit and number format for each core metric.
 METRIC_DISPLAY: dict[str, tuple[str, str, str]] = {
-    "gait_speed_mps": ("Gait speed", "m/s", "{:.2f}"),
+    "gait_speed_mps": ("Walking speed", "m/s", "{:.2f}"),
     "stride_time_cv_pct": ("Stride-time variability", "%", "{:.1f}"),
     "step_length_asymmetry_pct": ("Step-length asymmetry", "%", "{:.1f}"),
     "cadence_spm": ("Cadence", "steps/min", "{:.0f}"),
@@ -50,9 +51,38 @@ def get_config() -> Config:
     return Config.load()
 
 
-def open_repository(cfg: Config) -> SessionRepository:
-    """Open the session database. Callers are responsible for closing it."""
-    return SessionRepository(cfg.resolve_path("storage.db_path", PROJECT_ROOT))
+@st.cache_resource
+def open_repository(_cfg: Config) -> SessionRepository:
+    """Open the session database (cached resource).
+
+    Do NOT close the returned repository; the cached resource owns its
+    lifetime. Callers must drop their close() calls.
+    """
+    return SessionRepository(_cfg.resolve_path("storage.db_path", PROJECT_ROOT))
+
+
+def list_people(repository: SessionRepository) -> list[str]:
+    """People with stored data. The camera setup lives in the same table, but
+    it is not a person and must never appear in a person picker."""
+    from gaitscreen.calibration.setup import is_reserved
+
+    return [u for u in repository.list_users() if not is_reserved(u)]
+
+
+def current_setup(cfg: Config):
+    """The active camera setup, or None. Never raises: a storage hiccup must
+    read as "not set up" on screen, not as a crashed page."""
+    from gaitscreen.calibration.setup import load_setup
+
+    try:
+        return load_setup(open_repository(cfg))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def safe_user_id(user_id: str) -> str:
+    """Filesystem/DB-safe version of a person name."""
+    return re.sub(r'[\\/:*?"<>|]', "", user_id or "_unassigned").strip() or "_unassigned"
 
 
 def save_upload(uploaded, user_id: str) -> Path:
@@ -62,7 +92,8 @@ def save_upload(uploaded, user_id: str) -> Path:
     re-analysing the same video updates that session rather than creating a
     duplicate visit on the same date.
     """
-    target_dir = UPLOAD_DIR / (user_id or "_unassigned")
+    safe_id = safe_user_id(user_id)
+    target_dir = UPLOAD_DIR / safe_id
     target_dir.mkdir(parents=True, exist_ok=True)
     path = target_dir / uploaded.name
     path.write_bytes(uploaded.getbuffer())
@@ -74,10 +105,10 @@ def save_upload(uploaded, user_id: str) -> Path:
 # --------------------------------------------------------------------------
 def disclaimer() -> None:
     st.caption(
-        "Screening and trend-monitoring tool — **not a diagnostic instrument**. "
-        "It is built to flag *changes* in one person's walking over time. "
-        "All clinical thresholds are illustrative and must be reviewed against "
-        "current geriatric literature before real use."
+        ":material/info: Screening and trend-monitoring tool (**not a diagnostic "
+        "instrument**). It is built to flag *changes* in one person's walking over "
+        "time. All clinical thresholds are illustrative and must be reviewed "
+        "against current geriatric literature before real use."
     )
 
 
@@ -161,7 +192,7 @@ def render_recording_feedback(report, *, expanded: bool = True) -> None:
 
     headline = report.headline
     lead = (
-        f"**Most important fix — {headline.title.lower()}.** {headline.fix}"
+        f"**Most important fix: {headline.title.lower()}.** {headline.fix}"
         if headline else ""
     )
     body = lead + NL + NL + f'*Found: {summary}.*'

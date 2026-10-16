@@ -28,6 +28,9 @@ class AsymmetryResult:
     n_steps: dict[str, int]
     unavailable_reason: str | None = None
     note: str | None = None
+    #: Lower 95% one-sided bound on step_length_pct, from the step-to-step
+    #: spread on each side. See :func:`asymmetry_lower_bound`.
+    step_length_lower_pct: float | None = None
 
 
 def symmetry_index(left: float, right: float) -> float | None:
@@ -45,6 +48,35 @@ def symmetry_index(left: float, right: float) -> float | None:
     return float(100.0 * abs(left - right) / mean)
 
 
+#: One-sided 95% normal quantile.
+_Z_ONE_SIDED_95 = 1.645
+
+
+def asymmetry_lower_bound(left: list[float], right: list[float]) -> float | None:
+    """How much asymmetry the steps can confidently support, in percent.
+
+    Left/right evenness compares two averages, each typically of only six to
+    ten steps in a pilot recording, and single steps vary by 5-10% from one to
+    the next. That alone moves the difference between the averages by several
+    percent: on the pilot metronome clips the same walk read 2.7% and then
+    6.5% after nothing more than re-encoding the video. A flag set on the point
+    estimate therefore fires on noise for a perfectly even walker.
+
+    The bound subtracts the uncertainty of the difference (Welch standard
+    error, one-sided 95%) before converting to a percentage, so it answers
+    "how uneven is this walk at least", which is what a flag should act on.
+    """
+    if len(left) < 2 or len(right) < 2:
+        return None
+    left_a, right_a = np.asarray(left, float), np.asarray(right, float)
+    mean = 0.5 * (left_a.mean() + right_a.mean())
+    if mean <= 0:
+        return None
+    diff = abs(left_a.mean() - right_a.mean())
+    se = np.sqrt(left_a.var(ddof=1) / left_a.size + right_a.var(ddof=1) / right_a.size)
+    return float(100.0 * max(0.0, diff - _Z_ONE_SIDED_95 * se) / mean)
+
+
 def compute(measures: StepMeasures, *, camera_side: str | None = None) -> AsymmetryResult:
     lengths = measures.mean_per_side(measures.step_lengths_px)
     times = measures.mean_per_side(measures.step_times_s)
@@ -56,6 +88,9 @@ def compute(measures: StepMeasures, *, camera_side: str | None = None) -> Asymme
         step_length_per_side_px=lengths,
         step_time_per_side_s=times,
         n_steps=counts,
+        step_length_lower_pct=asymmetry_lower_bound(
+            measures.step_lengths_px["left"], measures.step_lengths_px["right"]
+        ),
     )
 
     # At least two steps per side, otherwise a single mis-detected step is the

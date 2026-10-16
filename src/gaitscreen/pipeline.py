@@ -218,12 +218,33 @@ def analyse_video(
     Pass ``None`` to skip the personal-trend checks entirely (absolute
     thresholds still apply).
     """
-    session_date = session_date or date_type.today().isoformat()
-
     extraction = extract_session(
         video_path, cfg, calibration=calibration, project_root=project_root,
         progress=progress, check_camera_motion=check_camera_motion,
     )
+    return analyse_extraction(
+        extraction, cfg, user_id=user_id, session_date=session_date,
+        declared_device=declared_device, history=history,
+    )
+
+
+def analyse_extraction(
+    extraction: Extraction,
+    cfg: Config,
+    *,
+    user_id: str,
+    session_date: Optional[str] = None,
+    declared_device: Optional[str] = None,
+    history: Optional[pd.DataFrame] = None,
+) -> SessionResult:
+    """Everything after pose estimation: analysis, quality, flags, diagnostics.
+
+    Split from :func:`analyse_video` because pose estimation is nearly all of
+    the cost and depends only on the video, while the flags depend on whose
+    walk it is and what they have done before. A fixed sample video can then
+    be tracked once and still be judged against each person's own history.
+    """
+    session_date = session_date or date_type.today().isoformat()
     analysis = analyse(extraction, cfg)
     coronal = analysis.view is not None and analysis.view.kind == view_module.CORONAL
     quality = score_session(

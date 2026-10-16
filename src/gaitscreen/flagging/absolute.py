@@ -38,8 +38,12 @@ def evaluate(metrics: SessionMetrics, cfg: Config) -> list[Flag]:
             continue
         label, unit = METRIC_LABELS.get(metric, (metric, ""))
 
+        # Where the metric carries an evidence floor, "above" thresholds are
+        # tested against it: the value shown is the estimate, but a flag says
+        # the walk is uneven, and that needs more than noise to back it.
+        floor = metrics.lower_bounds.get(metric)
         for severity in ("high", "moderate"):
-            triggered, threshold, comparison = _check(bands, severity, value)
+            triggered, threshold, comparison = _check(bands, severity, value, floor)
             if not triggered:
                 continue
             flags.append(
@@ -67,12 +71,13 @@ def evaluate(metrics: SessionMetrics, cfg: Config) -> list[Flag]:
     return flags
 
 
-def _check(bands: dict, severity: str, value: float):
+def _check(bands: dict, severity: str, value: float, floor: float | None = None):
     below = bands.get(f"{severity}_risk_below")
     if below is not None and value < below:
         return True, below, "below"
     above = bands.get(f"{severity}_risk_above")
-    if above is not None and value > above:
+    evidence = value if floor is None else min(value, floor)
+    if above is not None and evidence > above:
         return True, above, "above"
     return False, None, ""
 

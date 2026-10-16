@@ -376,8 +376,18 @@ def _fill_spatial(
     else:
         metrics.step_length_asymmetry_pct = result.step_length_pct
         metrics.step_time_asymmetry_pct = result.step_time_pct
-        if result.note:
-            metrics.low_confidence_metrics["step_length_asymmetry_pct"] = result.note
+        notes_here = [result.note] if result.note else []
+        if result.step_length_lower_pct is not None:
+            metrics.lower_bounds["step_length_asymmetry_pct"] = result.step_length_lower_pct
+            per_side = min(result.n_steps.values())
+            if result.step_length_pct - result.step_length_lower_pct > 3.0:
+                notes_here.append(
+                    f"based on only {per_side} steps per leg, so differences of up "
+                    f"to about {result.step_length_pct - result.step_length_lower_pct:.0f} "
+                    "points can come from ordinary step-to-step variation"
+                )
+        if notes_here:
+            metrics.low_confidence_metrics["step_length_asymmetry_pct"] = "; ".join(notes_here)
 
     # --- gait speed: three independent preconditions ---------------------
     speed = extraction.speed

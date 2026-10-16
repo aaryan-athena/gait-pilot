@@ -11,4 +11,15 @@ maxUploadSize = 400
 gatherUsageStats = false
 
 [theme]
+# Keep in step with the tokens in app/ui.py.
 base = "light"
+primaryColor = "#0B6E63"
+backgroundColor = "#F5F7F7"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#13232B"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+borderColor = "#E3E8EA"
+baseRadius = "0.6rem"
+
+[theme.sidebar]
+backgroundColor = "#FFFFFF"

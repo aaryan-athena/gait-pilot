@@ -14,7 +14,7 @@ Bump MINOR for changes that alter output values; bump PATCH for changes that
 cannot (logging, reporting, docstrings).
 """
 
-ALGO_VERSION = "0.5.0"
+ALGO_VERSION = "0.6.0"
 
 # Human-readable note on what defines this version's measurement, surfaced in
 # reports so a caregiver can see when the yardstick changed.
@@ -28,6 +28,15 @@ ALGO_NOTES = (
 #: What changed, and why a stored session from an earlier version is not
 #: comparable to one from this version without reprocessing.
 ALGO_CHANGELOG = {
+    "0.6.0": (
+        "Step-length asymmetry is only flagged when the left/right difference "
+        "clears the threshold at its lower 95% bound, given the step-to-step "
+        "spread. With about eight steps per leg and a side view that reads the "
+        "nearer foot's steps a few percent longer, healthy metronome walks read "
+        "3-12% and two of nine had been flagged; neither is now, and a limp at "
+        "33% still flags high. The reported values are unchanged; only which "
+        "sessions carry an asymmetry flag can differ."
+    ),
     "0.5.0": (
         "Steps are paired only within one walking pass. Pooling every heel "
         "strike across the recording paired the last strike before a turn or "

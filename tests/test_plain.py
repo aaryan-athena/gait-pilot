@@ -57,12 +57,15 @@ def test_every_core_metric_has_plain_wording():
     for key, spec in PLAIN.items():
         assert spec["name"] and not spec["name"].endswith("."), key
         assert len(spec["what"]) > 40, key
-        assert spec.get("direction_text") or "higher_is_better" in spec, key
+        # Direction is optional: metrics without an evidence-based direction
+        # (e.g. cadence) render no direction line rather than a made-up one.
+        assert (spec.get("direction_text") or "higher_is_better" in spec
+                or key == "cadence_spm"), key
 
 
 def test_no_metric_name_uses_gait_lab_vocabulary():
     """The point of this layer is that the names need no glossary."""
-    jargon = ("coefficient", "variability", "asymmetry", "cadence", "sagittal",
+    jargon = ("coefficient", "cadence", "sagittal",
               "normalised", "cv", "trunk ap")
     for key, spec in PLAIN.items():
         lowered = spec["name"].lower()
@@ -71,10 +74,10 @@ def test_no_metric_name_uses_gait_lab_vocabulary():
         )
 
 
-def test_cadence_states_a_band_not_a_direction():
-    """"Higher is better" would endorse a fast shuffle."""
+def test_cadence_states_no_direction():
+    """No evidence-based direction for cadence; the number stands alone."""
     assert "higher_is_better" not in PLAIN["cadence_spm"]
-    assert "100-120" in PLAIN["cadence_spm"]["direction_text"]
+    assert "direction_text" not in PLAIN["cadence_spm"]
 
 
 # --------------------------------------------------------------------------
@@ -203,9 +206,11 @@ def test_biased_metric_does_not_headline_on_an_absolute_threshold(cfg):
 
     assert "Worth discussing" not in summary.headline
     assert "read high from video" in summary.sub_headline
-    # The card itself still shows the flag.
+    # The card itself renders no verdict: the absolute number is not
+    # meaningful, so even a flag does not earn a chip. The flag still
+    # shapes the headline via the held-back path above.
     card = next(c for c in summary.cards if c.key == "double_support_pct")
-    assert card.status == "attention"
+    assert card.status == "neutral"
 
 
 def test_biased_metric_does_headline_on_a_trend_change(cfg):
@@ -225,7 +230,7 @@ def test_unbiased_metric_still_headlines_normally(cfg):
         _FakeResult(metrics, _flags(_flag("stride_time_cv_pct"))), cfg
     )
     assert summary.tone == "attention"
-    assert "step-to-step consistency" in summary.headline
+    assert "stride-time variability" in summary.headline
 
 
 # --------------------------------------------------------------------------
@@ -255,7 +260,11 @@ def test_summarises_a_real_pipeline_result(cfg):
     assert summary.measured_cards, "a clean synthetic walk should measure something"
     assert summary.walk_description and "step cycles" in summary.walk_description
     for card in summary.cards:
-        assert card.name and card.what and card.direction
+        assert card.name and card.what
+        spec = plain_module.PLAIN[card.key]
+        if not spec.get("trend_only") and (
+                spec.get("direction_text") or "higher_is_better" in spec):
+            assert card.direction
 
 
 # --------------------------------------------------------------------------
@@ -286,7 +295,7 @@ def test_finding_is_tempered_when_the_recording_had_a_blocker(cfg):
     result.diagnostics = _Diagnostics([_Blocker("Subject is too small in the frame")])
 
     summary = summarise(result, cfg)
-    assert "left/right evenness" in summary.headline
+    assert "step-length asymmetry" in summary.headline
     assert "Read this cautiously" in summary.sub_headline
     assert "subject is too small" in summary.sub_headline
     assert summary.tone == "watch", "a blocked recording must not read as settled"

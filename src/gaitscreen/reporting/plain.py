@@ -31,13 +31,14 @@ from typing import Literal, Optional
 from ..config import Config
 from ..types import CORE_METRICS, SessionMetrics
 
-Status = Literal["good", "watch", "attention", "unmeasured"]
+Status = Literal["good", "watch", "attention", "unmeasured", "neutral"]
 
 STATUS_LABEL: dict[Status, str] = {
     "good": "Typical",
     "watch": "Keep an eye on",
     "attention": "Worth discussing",
     "unmeasured": "Not measured",
+    "neutral": "Trend only",
 }
 
 #: Ordering, naming and explanation for each metric, aimed at a non-specialist.
@@ -56,15 +57,15 @@ PLAIN: dict[str, dict] = {
         "name": "Steps per minute",
         "unit": "steps/min",
         "fmt": "{:.0f}",
-        # Cadence has a comfortable band rather than a good direction. Saying
-        # "higher is better" would endorse a fast shuffle, which is the opposite
-        # of what it usually indicates.
-        "direction_text": "usually 100-120 in comfortable walking",
+        # No direction text: cadence has no evidence-based risk threshold, and
+        # stating the 100-120 comfortable band next to a "Typical" verdict
+        # contradicts it for slow walkers. The number is shown without a
+        # directional judgment.
         "what": "How often they take a step. Taken together with step length, "
                 "this is what makes up walking speed.",
     },
     "stride_time_cv_pct": {
-        "name": "Step-to-step consistency",
+        "name": "Stride-time variability",
         "unit": "% variation",
         "fmt": "{:.1f}",
         "higher_is_better": False,
@@ -73,7 +74,7 @@ PLAIN: dict[str, dict] = {
                 "most closely linked to falls in older adults.",
     },
     "step_length_asymmetry_pct": {
-        "name": "Left/right evenness",
+        "name": "Step-length asymmetry",
         "unit": "% difference",
         "fmt": "{:.1f}",
         "higher_is_better": False,
@@ -85,6 +86,7 @@ PLAIN: dict[str, dict] = {
         "unit": "% of each step",
         "fmt": "{:.1f}",
         "higher_is_better": False,
+        "trend_only": True,
         "what": "How much of each walking cycle is spent with both feet on the "
                 "ground. People who feel unsteady tend to spend longer on both "
                 "feet, because it is the stable part of the cycle.",
@@ -96,7 +98,7 @@ PLAIN: dict[str, dict] = {
         ),
     },
     "trunk_ap_sway_norm": {
-        "name": "Upper-body steadiness",
+        "name": "Upper-body sway",
         "unit": "",
         "fmt": "{:.3f}",
         "higher_is_better": False,
@@ -137,8 +139,9 @@ PLAIN: dict[str, dict] = {
 #: The full technical reason is still available and still shown on request; this
 #: is what leads.
 UNMEASURED_PLAIN: list[tuple[str, str]] = [
-    ("no calibration", "Needs a one-off setup step to convert pixels into metres. "
-                       "Everything else on this page works without it."),
+    ("no calibration", "Needs a one-off setup step to convert pixels into metres: "
+                       "enter how much floor the camera sees on the Camera setup "
+                       "page. Everything else on this page works without it."),
     ("forward travel", "The person does not cross the frame in this video, so "
                        "there is no distance to measure speed over."),
     ("camera itself moved", "The camera moved during the recording, so distance "
@@ -171,7 +174,7 @@ class MetricCard:
     status: Status
     value_text: str  # formatted value with unit, or ""
     what: str  # what this measures, in plain words
-    direction: str  # "higher is better" / "lower is better"
+    direction: Optional[str]  # "higher is better" / "lower is better"; None when no verdict is rendered
     note: Optional[str] = None  # caveat or plain unmeasured reason
     technical_note: Optional[str] = None  # the full original wording
     everyday: Optional[str] = None  # an everyday-units restatement
@@ -202,15 +205,15 @@ class PlainSummary:
         return [c for c in self.cards if not c.measured]
 
 
-def summarise(result, cfg: Config) -> PlainSummary:
+def summarise(result, cfg: Config, *, include_technical: bool = False) -> PlainSummary:
     """Build the plain-language view of a completed session."""
     metrics = result.metrics
     statuses = _statuses_from_flags(result)
-    cards = [_card(key, metrics, statuses, cfg)
+    cards = [_card(key, metrics, statuses, cfg, include_technical)
              for key in _metrics_for_view(result)]
 
     n_measured = sum(1 for c in cards if c.measured)
-    headline, sub, tone = _verdict(result, cards, n_measured)
+    headline, sub, tone = _verdict(result, cards, n_measured, statuses)
 
     return PlainSummary(
         headline=headline,
@@ -285,12 +288,18 @@ def _leads_verdict(card: MetricCard, result) -> bool:
 
 
 def _card(key: str, metrics: SessionMetrics, statuses: dict[str, Status],
-          cfg: Config) -> MetricCard:
+          cfg: Config, include_technical: bool = False) -> MetricCard:
     spec = PLAIN[key]
     value = metrics.value(key)
-    direction = spec.get("direction_text") or (
-        "higher is better" if spec.get("higher_is_better") else "lower is better"
-    )
+    trend_only = spec.get("trend_only", False)
+    if "direction_text" in spec:
+        direction = spec["direction_text"]
+    elif "higher_is_better" in spec:
+        direction = "higher is better" if spec["higher_is_better"] else "lower is better"
+    else:
+        direction = None
+    if trend_only:
+        direction = None
 
     if value is None:
         technical = metrics.unavailable.get(key)
@@ -306,13 +315,14 @@ def _card(key: str, metrics: SessionMetrics, statuses: dict[str, Status],
     if key == "gait_speed_mps":
         everyday = spec["everyday"].format(kmh=value * 3.6)
 
-    note = _plain_caveat(metrics.low_confidence_metrics.get(key))
+    note = None if trend_only else _plain_caveat(metrics.low_confidence_metrics.get(key), include_technical)
     bias = spec.get("known_bias")
     if bias:
         note = f"{bias} {note}" if note else bias
 
+    status: Status = "neutral" if trend_only else statuses.get(key, "good")
     return MetricCard(
-        key=key, name=spec["name"], status=statuses.get(key, "good"),
+        key=key, name=spec["name"], status=status,
         value_text=value_text, what=spec["what"], direction=direction,
         note=note, technical_note=metrics.low_confidence_metrics.get(key),
         everyday=everyday,
@@ -329,11 +339,20 @@ def _plain_unmeasured(technical: Optional[str]) -> str:
     return "This could not be worked out from this video."
 
 
-def _plain_caveat(technical: Optional[str]) -> Optional[str]:
-    """Shorten the low-confidence caveats to a single readable sentence."""
+def _plain_caveat(technical: Optional[str], include_technical: bool = False) -> Optional[str]:
+    """Shorten the low-confidence caveats to a single readable sentence.
+
+    Pipeline-internals caveats (step-detection disagreement, leg separation)
+    are only included when include_technical is True; they are not actionable
+    for a non-specialist reader.
+    """
     if not technical:
         return None
     lowered = technical.lower()
+    if "steps per leg" in lowered and "ordinary step-to-step" in lowered:
+        return ("Based on a small number of steps, so a gap of a few points can "
+                "be ordinary variation. It is only flagged when the difference is "
+                "too large for that to explain.")
     if "fps" in lowered and "quantised" in lowered:
         return ("Treat as a rough figure: the video frame rate is too low to "
                 "time steps precisely. Record at 60 fps for a reliable value.")
@@ -344,9 +363,13 @@ def _plain_caveat(technical: Optional[str]) -> Optional[str]:
         return ("Measured from one side, so the far leg is partly hidden. Record "
                 "a pass in each direction for a fairer left/right comparison.")
     if "inconsistent" in lowered or "independent count" in lowered:
+        if not include_technical:
+            return None
         return ("Treat with caution: the step detection did not agree with itself "
                 "on this video.")
     if "not being tracked separately" in lowered:
+        if not include_technical:
+            return None
         return "Treat with caution: the two legs were hard to tell apart here."
     if "single-scalar pixel scale" in lowered:
         return ("Approximate: the distance setup assumes the person stays the same "
@@ -356,8 +379,12 @@ def _plain_caveat(technical: Optional[str]) -> Optional[str]:
     return None
 
 
-def _verdict(result, cards: list[MetricCard], n_measured: int) -> tuple[str, str, str]:
+def _verdict(result, cards: list[MetricCard], n_measured: int,
+             statuses: dict[str, Status]) -> tuple[str, str, str]:
     """The single line that leads the results page."""
+    # Verdict logic uses the flag-derived statuses, not the cards' display
+    # statuses: a trend-only metric shows "Trend only" on its card but its
+    # flags must still drive (or be held back from) the headline.
     if n_measured == 0:
         return (
             "This video could not be measured",
@@ -368,9 +395,11 @@ def _verdict(result, cards: list[MetricCard], n_measured: int) -> tuple[str, str
         )
 
     attention = [c for c in cards
-                 if c.status == "attention" and _leads_verdict(c, result)]
+                 if statuses.get(c.key, "good") == "attention"
+                 and _leads_verdict(c, result)]
     watch = [c for c in cards
-             if c.status == "watch" and _leads_verdict(c, result)]
+             if statuses.get(c.key, "good") == "watch"
+             and _leads_verdict(c, result)]
     trend_flags = [f for f in result.flags.flags if f.trigger == "trend"]
 
     caveat = _confidence_caveat(result)
@@ -402,7 +431,7 @@ def _verdict(result, cards: list[MetricCard], n_measured: int) -> tuple[str, str
             "watch",
         )
     held_back = [c for c in cards
-                 if c.status in ("attention", "watch")
+                 if statuses.get(c.key, "good") in ("attention", "watch")
                  and not _leads_verdict(c, result)]
     if held_back:
         names = _join([c.name.lower() for c in held_back])
@@ -412,6 +441,13 @@ def _verdict(result, cards: list[MetricCard], n_measured: int) -> tuple[str, str
             "this tool is known to read high from video and so should be judged "
             "on how it changes between sessions rather than on today's number. "
             "Repeat sessions are what make any of this meaningful.",
+            "watch",
+        )
+    if caveat:
+        return (
+            "Couldn't get a reliable read on this walk",
+            f"The individual measures look typical. {caveat.strip()} "
+            "Improve the recording and try again -- the feedback below says how.",
             "watch",
         )
     return (

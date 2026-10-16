@@ -244,9 +244,10 @@ flagging:
     step_length_asymmetry_pct:
       high_risk_above: 15.0
       moderate_risk_above: 8.0
-    double_support_pct:
-      high_risk_above: 30.0
-      moderate_risk_above: 26.0
+    # double_support_pct: no absolute thresholds. 2D heel-strike detection runs
+    # systematically late, biasing DS upward - the absolute number is meaningless.
+    # The bias is consistent within one person + camera setup, so DS is trend-only:
+    # flag on deviation from the person's own baseline, never on a cutoff.
 
   # --- Personal trend check ---
   baseline:

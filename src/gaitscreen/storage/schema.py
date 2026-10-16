@@ -165,13 +165,84 @@ def connect(db_path: str | Path, *, create: bool = True) -> sqlite3.Connection:
     elif not db_path.exists():
         raise FileNotFoundError(f"no gaitscreen database at {db_path}")
 
-    conn = sqlite3.connect(db_path)
+    # check_same_thread=False: the repository is cached with
+    # @st.cache_resource and Streamlit reruns the script on a different
+    # thread each time, so the creating thread is not the using thread.
+    # sqlite3.threadsafety is 3 (serialized), so one shared connection is
+    # safe; without this every rerun after the first raises
+    # ProgrammingError.
+    conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     if create:
         initialise(conn)
     return conn
+
+
+def connect_turso(url: str, auth_token: str):
+    """Connect to Turso (serverless SQLite). Falls back gracefully on import failure.
+
+    Returns a libsql connection, or raises ImportError if libsql-experimental
+    is not installed. The caller is responsible for schema initialisation.
+    """
+    try:
+        import libsql_experimental as libsql
+    except ImportError as e:
+        raise ImportError(
+            "libsql-experimental is required for Turso support. "
+            "Install with: pip install libsql-experimental"
+        ) from e
+    conn = libsql.connect(database=url, auth_token=auth_token)
+    # libsql connections support the DB-API execute/commit interface
+    return conn
+
+
+def get_connection(db_path=None, *, create: bool = True):
+    """Get a database connection: Turso if configured, else local SQLite.
+
+    Checks Streamlit secrets for [turso] url and auth_token. If present and
+    libsql-experimental is installed, connects to Turso. Otherwise falls back
+    to local SQLite at db_path. This keeps the app working even if Turso is
+    unreachable -- it just won't persist across reboots.
+    """
+    # Try Turso first (only if secrets are configured)
+    note = None
+    try:
+        import streamlit as st
+        turso_cfg = st.secrets.get("turso", {})
+        url = turso_cfg.get("url")
+        token = turso_cfg.get("auth_token")
+        if url and token:
+            try:
+                conn = connect_turso(url, token)
+                # Initialise schema on Turso (idempotent).
+                if create:
+                    # Foreign keys default off; delete_session relies on CASCADE
+                    try:
+                        conn.execute("PRAGMA foreign_keys = ON")
+                    except Exception:
+                        pass
+                    _apply_ddl(conn)
+                    # A remote backend may reject PRAGMA table_info; a missing
+                    # migration is recoverable, losing the Turso path is not.
+                    try:
+                        _add_missing_columns(conn)
+                    except Exception:
+                        pass
+                    conn.execute(
+                        "INSERT INTO schema_meta(key, value) VALUES('schema_version', ?) "
+                        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                        (str(SCHEMA_VERSION),),
+                    )
+                    conn.commit()
+                return conn, "turso", None
+            except Exception as exc:
+                note = f"Turso unavailable ({exc!r}); using ephemeral local storage"
+    except Exception:
+        # No streamlit secrets (e.g. CLI/testing) -- use SQLite
+        pass
+    return connect(db_path, create=create), "sqlite", note
 
 
 #: Columns added after the first release, as {table: {column: type}}. SQLite
@@ -193,7 +264,8 @@ def _add_missing_columns(conn: sqlite3.Connection) -> list[str]:
     added: list[str] = []
     for table, columns in _ADDED_COLUMNS.items():
         existing = {
-            row["name"] for row in conn.execute(f"PRAGMA table_info({table})")
+            row[1]
+            for row in conn.execute(f"PRAGMA table_info({table})", ()).fetchall()
         }
         if not existing:
             continue  # table not created yet; the DDL will do it
@@ -204,10 +276,22 @@ def _add_missing_columns(conn: sqlite3.Connection) -> list[str]:
     return added
 
 
+def _apply_ddl(conn) -> None:
+    """Run the DDL statement by statement: libsql has no executescript().
+
+    Comments are stripped first -- two of them contain a semicolon, and a
+    naive split on ";" cuts a CREATE TABLE in half.
+    """
+    body = "\n".join(line.split("--")[0] for line in _DDL.splitlines())
+    for statement in body.split(";"):
+        if statement.strip():
+            conn.execute(statement)
+
+
 def initialise(conn: sqlite3.Connection) -> None:
     """Apply the DDL and record the schema version."""
     with conn:
-        conn.executescript(_DDL)
+        _apply_ddl(conn)
         _add_missing_columns(conn)
         conn.execute(
             "INSERT INTO schema_meta(key, value) VALUES('schema_version', ?) "
@@ -220,4 +304,4 @@ def schema_version(conn: sqlite3.Connection) -> int:
     row = conn.execute(
         "SELECT value FROM schema_meta WHERE key='schema_version'"
     ).fetchone()
-    return int(row["value"]) if row else 0
+    return int(row[0]) if row else 0

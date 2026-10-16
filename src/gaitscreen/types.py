@@ -336,6 +336,11 @@ class SessionMetrics:
 
     unavailable: dict[str, str] = field(default_factory=dict)
     low_confidence_metrics: dict[str, str] = field(default_factory=dict)
+    #: The smallest value the data can confidently support, for metrics whose
+    #: point estimate rests on few observations. Absolute "above" thresholds are
+    #: judged against this rather than the point estimate, so a value that only
+    #: crosses a line by noise is shown but not flagged.
+    lower_bounds: dict[str, float] = field(default_factory=dict)
 
     def value(self, metric: str) -> Optional[float]:
         return getattr(self, metric, None)

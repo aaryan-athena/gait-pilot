@@ -17,7 +17,8 @@ STATUS_CHIP: dict[str, str] = {
     "good": ":green[**✓ Typical**]",
     "watch": ":orange[**● Keep an eye on**]",
     "attention": ":red[**▲ Worth discussing**]",
-    "unmeasured": ":grey[**— Not measured**]",
+    "unmeasured": ":grey[**Not measured**]",
+    "neutral": ":grey[**Trend only**]",
 }
 
 TONE_RENDERER = {
@@ -31,15 +32,16 @@ VIDEO_CAPTION = (
     "The skeleton is what the tool actually tracked, and the circles mark the "
     "moments it decided each foot landed and lifted. If the skeleton follows the "
     "joints and the red circles appear as the heel touches down, the "
-    "measurements rest on solid ground. If they do not, they do not — and this "
+    "measurements rest on solid ground. If they do not, they do not, and this "
     "is the quickest way to tell."
 )
 
 
 def render_verdict(summary) -> None:
     """The single line that leads the results page."""
-    renderer = TONE_RENDERER.get(summary.tone, st.info)
-    renderer("### " + summary.headline + "\n\n" + summary.sub_headline)
+    from app import ui
+
+    ui.banner(summary.headline, summary.sub_headline, tone=summary.tone)
     if summary.walk_description:
         st.caption(summary.walk_description)
 
@@ -72,7 +74,7 @@ def render_plain_cards(summary) -> None:
             "of anything about the person's walking."
         )
         for card in unmeasured:
-            st.markdown(f"**{card.name}** — {card.note}")
+            st.markdown(f"**{card.name}**: {card.note}")
             st.caption(card.what)
 
 
@@ -84,7 +86,8 @@ def _plain_card(card) -> None:
             st.markdown(f"## {card.value_text}")
             if card.everyday:
                 st.caption(card.everyday)
-            st.caption(f"_{card.direction}_")
+            if card.direction:
+                st.caption(f"_{card.direction}_")
         st.caption(card.what)
         if card.note:
             st.caption(f":orange[⚠ {card.note}]")

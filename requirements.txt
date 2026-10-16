@@ -34,3 +34,6 @@ pyyaml>=6.0                   # verified: 6.0.3
 
 # --- pilot platform ----------------------------------------------------------
 streamlit>=1.30               # verified: 1.61.1
+# --- persistent storage (Turso) ------------------------------------------------
+# Serverless SQLite. Optional: app falls back to local SQLite if not configured.
+libsql-experimental==0.0.55       # Turso client (pinned: unpinned pulls Rust builds)
