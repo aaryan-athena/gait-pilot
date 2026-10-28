@@ -1,0 +1,6 @@
+# Shell scripts and service files run on Linux (the Raspberry Pi). Git on
+# Windows would otherwise check them out with CRLF line endings, which bash
+# rejects with errors like "$'\r': command not found".
+*.sh text eol=lf
+*.service text eol=lf
+*.desktop text eol=lf

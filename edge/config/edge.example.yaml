@@ -1,0 +1,52 @@
+# gaitedge device settings. Copy to /etc/gaitedge/edge.yaml and edit.
+# Anything left out takes the default in gaitedge/settings.py.
+
+device:
+  id: corridor-east-01        # unique per device; shown on the platform
+  site: "Sunrise Care, east corridor"
+
+camera:
+  backend: picamera2          # picamera2 (ribbon camera) | opencv (USB) | file (testing)
+  width: 1280                 # 720p: the Pi 5 compresses video on the CPU, and
+  height: 720                 #   1080p at 60 fps is more than it can keep up with
+  fps: 60                     # 60 is needed for step-to-step timing
+  rotate: 0
+
+trigger:
+  mode: motion                # motion | manual | continuous
+  stop_after_s: 8.0           # hold the clip open through a turn out of frame
+  min_clip_s: 4.0
+  max_clip_s: 90.0
+
+record:
+  codec: h264                 # set to mjpeg if `gaitedge bench` says h264 is too slow
+
+processing:
+  mode: auto                  # auto reads the benchmark; or force local / remote
+  model: full                 # full measures like heavy at ~2.4x the speed (see README)
+  coverage_m: 4.10            # floor length the camera sees on the walking line;
+                              #   leave empty to skip walking speed
+
+upload:
+  server_url: null            # e.g. https://gait.example.org; empty = keep on device
+  token: null                 # per-device secret issued by the server
+
+storage:
+  root: /var/lib/gaitedge
+  max_disk_gb: 20
+  keep_raw_after_upload: false   # raw footage of people is deleted once delivered
+  keep_days: 14
+
+# Overrides to the shared analysis config. Leave empty: anything set here
+# makes this device measure differently from the others, and is reported with
+# every result so the difference is visible.
+# Live view of the camera, opened full screen on an attached monitor at
+# desktop login. 127.0.0.1 keeps it on this device only; 0.0.0.0 lets other
+# computers on the network watch at http://<pi>:8080 (handy while aiming the
+# camera, but it shows people: do not leave it open in a care setting).
+preview:
+  enabled: true
+  host: 127.0.0.1
+  port: 8080
+
+analysis_overrides: {}

@@ -1,0 +1,23 @@
+# gaitedge: what the headless device needs.
+#
+# The gait analysis itself is the `gaitscreen` package from this repository,
+# installed with --no-deps (see deploy/install_pi.sh) because its own
+# requirements name the desktop build of OpenCV, which on a screenless Pi
+# wants graphics libraries that are not there. Everything it actually needs
+# at run time is listed here instead, with the headless OpenCV.
+
+mediapipe>=0.10.30
+opencv-python-headless>=4.9
+numpy>=1.26
+scipy>=1.11
+pandas>=2.1
+pyyaml>=6.0
+
+# Recording with each frame's real capture time (see gaitedge/recorder.py).
+av>=12
+# Uploads to the server.
+requests>=2.31
+
+# picamera2 is NOT installed from here: on Raspberry Pi OS it comes from apt
+# (python3-picamera2), and the virtual environment is created with
+# --system-site-packages so it can see it.

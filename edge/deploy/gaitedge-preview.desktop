@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=gaitedge live view
+Comment=Show the camera full screen when a monitor is attached
+Exec=/opt/gaitedge/edge/deploy/preview_kiosk.sh
+Terminal=false
+X-GNOME-Autostart-enabled=true

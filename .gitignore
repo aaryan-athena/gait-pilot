@@ -50,3 +50,7 @@ models/*.task
 *.swp
 .DS_Store
 Thumbs.db
+
+# --- gaitedge development ----------------------------------------------------
+# Uploads stored by edge/tools/dev_receiver.py while testing.
+edge/received/

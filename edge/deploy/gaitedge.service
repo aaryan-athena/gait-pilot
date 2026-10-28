@@ -1,0 +1,26 @@
+# systemd unit for the gaitedge device service.
+# Installed by deploy/install_pi.sh to /etc/systemd/system/gaitedge.service.
+
+[Unit]
+Description=gaitedge: record and analyse walks from the attached camera
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=gaitedge
+Group=gaitedge
+# video: camera access; render: libcamera on the Pi 5.
+SupplementaryGroups=video render
+WorkingDirectory=/opt/gaitedge/edge
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/gaitedge/venv/bin/python -m gaitedge --config /etc/gaitedge/edge.yaml run
+# Uploads and analysis resume from the on-disk queue after any restart.
+Restart=always
+RestartSec=10
+# Give an in-progress recording time to close cleanly on shutdown.
+TimeoutStopSec=60
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target
