@@ -117,10 +117,19 @@ camera really delivers the frame rate set, the server, and the benchmark.
   pausing) is deleted on the device, not sent. Raw footage is deleted once the
   server has it (`keep_raw_after_upload: false`). What leaves the device by
   default is the result and the annotated replay.
-* **Who walked.** The device cannot know. Results are uploaded as
-  `unassigned`, with only the absolute checks applied (e.g. speed under the
-  illustrative threshold). Personal-trend checks need the walk assigned to a
-  person, which belongs on the server/platform.
+* **Who walked.** The device describes the walker but does not name them:
+  it holds no list of people (and so no faces of residents) to compare
+  against. Each result carries an `identity` block — body proportions and,
+  with `processing.identity: faces`, up to 8 face embeddings — computed by
+  the same `gaitscreen.identity` code the app uses. The platform suggests who
+  it was and staff confirm. Results are uploaded as `unassigned`, with only
+  the absolute checks applied; personal-trend checks run once the walk has a
+  person. The face pass adds ~15 s per walk on a laptop (it re-reads the
+  video); expect a few times that on the Pi.
+* **Face consent.** `faces` sends embeddings of whoever walked past, including
+  people who have not consented; the platform keeps them only for people with
+  consent recorded. Where that is not acceptable, set
+  `processing.identity: walk` (body proportions only) or `off`.
 * **No server configured.** Walks are analysed and kept on the device.
 
 ## Live view
@@ -155,6 +164,11 @@ Full contract in `gaitedge/uploader.py`; an executable reference in
   a device that lost the reply sends again.
 * 408, 429 and 5xx are retried with backoff (15 s doubling to 15 min); other
   4xx are permanent and not retried.
+* `result` is `gaitedge.result/2`: as `/1`, plus `identity`
+  (`signature` — view and body/gait traits; `faces` — list of `embedding`
+  (128 floats, unit length), `score`, `size_px`, `t`; `seconds`; `error` if
+  the pass failed). Signatures from the `full` model differ slightly from
+  `heavy` (thigh-to-shin 0.941 vs 0.929 on one clip): keep one model per site.
 * `POST /api/v1/devices/<id>/heartbeat`: JSON status every 5 minutes —
   queue depths, disk, CPU temperature, processing mode.
 

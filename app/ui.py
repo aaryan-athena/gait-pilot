@@ -17,11 +17,12 @@ from typing import Iterable, Optional, Sequence
 import streamlit as st
 
 #: Page names, in sidebar order. The first is the landing page.
-PAGES = ["Trends", "Analyse a walk", "Camera setup", "Limitations"]
+PAGES = ["Trends", "Analyse a walk", "People", "Camera setup", "Limitations"]
 
 PAGE_ICONS = {
     "Trends": ":material/monitoring:",
     "Analyse a walk": ":material/directions_walk:",
+    "People": ":material/group:",
     "Camera setup": ":material/straighten:",
     "Limitations": ":material/info:",
 }

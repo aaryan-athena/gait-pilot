@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 import pandas as pd
 import streamlit as st
 
-from app import ui
+from app import identify, ui
 from app.samples import (Sample, available_samples, cached_extraction,
                          cached_overlay, get_sample, sample_setup)
 from app.shared import (PROJECT_ROOT, VIDEO_TYPES, bullet_list, current_setup,
@@ -281,9 +281,11 @@ def _person_and_date(locked: bool):
     details = st.columns(2)
     with details[0]:
         person = st.text_input(
-            "Person name", key="person_name", placeholder="e.g. Bob",
+            "Person name", key="person_name", placeholder="e.g. Bob, or leave blank",
             disabled=locked,
-            help="Used to group this person's walks into a trend.",
+            help="Used to group this person's walks into a trend. Leave it blank "
+                 "to have the person suggested after the analysis, from their face "
+                 "or the way they are built and walk.",
         )
     with details[1]:
         # Seeded through session state rather than value=: the key is kept
@@ -416,6 +418,7 @@ def _run_inner(cfg: Config, uploaded, settings: dict, setup) -> None:
         st.session_state["result_saved"] = False
         # Remember which file was analyzed, so a new upload clears stale results.
         st.session_state["_analyzed_file_key"] = _source_key(uploaded)
+        st.session_state["identity"] = _identify(cfg, result, path, progress)
         st.session_state["overlay"] = (
             _render_overlay(cfg, result, progress) if settings["make_video"] else None
         )
@@ -430,6 +433,16 @@ def _run_inner(cfg: Config, uploaded, settings: dict, setup) -> None:
             st.code(detail)
         st.session_state["result"] = None
         st.session_state["overlay"] = None
+        st.session_state["identity"] = None
+
+
+def _identify(cfg: Config, result, video_path, progress) -> dict | None:
+    if not identify.enabled(cfg):
+        return None
+    st.session_state["progress_pct"] = 0.9
+    st.session_state["progress_text"] = "Checking who is walking…"
+    progress.progress(0.9, text="Checking who is walking…")
+    return identify.identify(cfg, result, video_path)
 
 
 def _run_sample(cfg: Config, sample: Sample, settings: dict) -> None:
@@ -462,6 +475,7 @@ def _run_sample(cfg: Config, sample: Sample, settings: dict) -> None:
         st.session_state["result"] = result
         st.session_state["result_saved"] = False
         st.session_state["_analyzed_file_key"] = _source_key(sample)
+        st.session_state["identity"] = _identify(cfg, result, sample.path, progress)
 
         overlay = None
         if settings["make_video"]:
@@ -481,6 +495,7 @@ def _run_sample(cfg: Config, sample: Sample, settings: dict) -> None:
         st.error(f"Analysis failed: {exc}")
         st.session_state["result"] = None
         st.session_state["overlay"] = None
+        st.session_state["identity"] = None
 
 
 def _render_overlay(cfg: Config, result, progress) -> dict | None:
@@ -596,8 +611,12 @@ def _save_panel(cfg: Config, result, settings: dict) -> None:
     a pilot user analyses plenty of test clips that should never enter anyone's
     history."""
     person = settings["user_id"]
+    ident = st.session_state.get("identity")
     with st.container(border=True):
         cols = st.columns([3, 1.3], vertical_alignment="center")
+        if not st.session_state.get("result_saved") and not person and ident is not None:
+            _confirm_person(cfg, result, settings, ident)
+            return
         if st.session_state.get("result_saved"):
             with cols[0]:
                 st.markdown(f":material/check_circle: **Saved to {result.user_id}'s "
@@ -617,9 +636,67 @@ def _save_panel(cfg: Config, result, settings: dict) -> None:
             if st.button("Save to trend", type="primary", icon=":material/bookmark_add:",
                          disabled=not person, key="save_to_trend"):
                 result.user_id = safe_user_id(person)
-                _save(cfg, result, settings["notes"])
+                session_id = _save(cfg, result, settings["notes"])
+                if session_id:
+                    identify.remember(cfg, session_id, result.user_id, ident)
                 st.session_state["result_saved"] = True
                 st.rerun()
+        if person and ident and ident.get("candidates"):
+            top = ident["candidates"][0]
+            if top.band == "strong" and top.user_id != safe_user_id(person):
+                st.warning(f"This walk looks like **{top.user_id}**, not {person} "
+                           f"({identify.candidate_label(top)}). Check the name before "
+                           "saving.", icon=":material/person_alert:")
+
+
+NEW_PERSON = "Someone new…"
+
+
+def _confirm_person(cfg: Config, result, settings: dict, ident: dict) -> None:
+    """Suggest who walked; a person confirms before it joins anyone's trend.
+
+    Flags are worked out again for the confirmed person, because the personal
+    checks compare the walk with that person's own history, which was unknown
+    while the analysis ran.
+    """
+    candidates = ident.get("candidates") or []
+    if candidates:
+        top = candidates[0]
+        sure = top.band == "strong"
+        st.markdown(f"**{'This looks like' if sure else 'This may be'} {top.user_id}.** "
+                    f"{identify.reason(top).capitalize()}."
+                    " Confirm or correct, then save.")
+    elif ident.get("error"):
+        st.markdown("**Who is this?** Could not suggest anyone this time "
+                    f"({ident['error']}).")
+    else:
+        st.markdown("**Who is this?** No one recognised: either a new person, or no "
+                    "clear face and not enough saved walks of theirs to go on yet.")
+
+    choices = identify.person_choices(cfg, candidates) + [NEW_PERSON]
+    labels = {c.user_id: identify.candidate_label(c) for c in candidates}
+    pick, name, button = st.columns([2, 2, 1.3], vertical_alignment="bottom")
+    with pick:
+        chosen = st.selectbox("Person", choices, index=0, key=f"confirm_person_{result.session_id}",
+                              format_func=lambda p: labels.get(p, p))
+    with name:
+        new_name = st.text_input("New person's name", key=f"confirm_new_name_{result.session_id}",
+                                 disabled=chosen != NEW_PERSON)
+    who = (new_name or "").strip() if chosen == NEW_PERSON else chosen
+    with button:
+        if st.button("Confirm and save", type="primary", icon=":material/how_to_reg:",
+                     disabled=not who, key="confirm_save"):
+            user = safe_user_id(who)
+            history = open_repository(cfg).sessions_for_user(
+                user, before_date=result.session_date)
+            assigned = analyse_extraction(result.extraction, cfg, user_id=user,
+                                          session_date=result.session_date, history=history)
+            st.session_state["result"] = assigned
+            session_id = _save(cfg, assigned, settings["notes"])
+            if session_id:
+                identify.remember(cfg, session_id, user, ident)
+            st.session_state["result_saved"] = True
+            st.rerun()
 
 
 def technical_mode() -> bool:
@@ -768,7 +845,8 @@ def _render_diagnostics(cfg: Config, result) -> None:
     st.caption(f"Algorithm version {ALGO_VERSION}: {ALGO_NOTES}")
 
 
-def _save(cfg: Config, result, notes: str) -> None:
+def _save(cfg: Config, result, notes: str) -> str | None:
+    """Save the session; its id, or None if the save failed (already reported)."""
     repository = open_repository(cfg)
     try:
         # A session_id is person + date + file name, and the insert upserts.
@@ -796,6 +874,7 @@ def _save(cfg: Config, result, notes: str) -> None:
                 "point instead of duplicating the walk. To add a point, use a "
                 "different clip or change the recording date."
             )
+        return session_id
     except Exception as exc:  # noqa: BLE001
         detail = traceback.format_exc()
         print("SAVE FAILED\n" + detail, flush=True)

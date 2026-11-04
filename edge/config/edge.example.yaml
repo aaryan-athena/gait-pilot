@@ -26,6 +26,8 @@ processing:
   model: full                 # full measures like heavy at ~2.4x the speed (see README)
   coverage_m: 4.10            # floor length the camera sees on the walking line;
                               #   leave empty to skip walking speed
+  identity: faces             # faces | walk | off: what the result says about who
+                              #   walked, for the platform to match (see README)
 
 upload:
   server_url: null            # e.g. https://gait.example.org; empty = keep on device

@@ -78,6 +78,10 @@ DEFAULTS: dict[str, Any] = {
         "coverage_m": None,      # floor length the camera sees; enables speed
         "max_realtime_factor": 6.0,  # auto: local only if a walk takes <= this
                                      # many times its own length to analyse
+        # What the result says about who walked, for the platform to match:
+        # faces (body proportions + face embeddings), walk (proportions
+        # only), or off. The device never matches: it has no list of people.
+        "identity": "faces",
     },
     "upload": {
         "server_url": None,      # e.g. https://gait.example.org
@@ -201,6 +205,10 @@ def _validate(data: dict) -> None:
         problems.append("processing.mode must be local, remote or auto")
     if data["processing"]["model"] not in MODEL_VARIANTS:
         problems.append(f"processing.model must be one of {MODEL_VARIANTS}")
+    if data["processing"]["identity"] is False:
+        data["processing"]["identity"] = "off"   # YAML reads a bare `off` as false
+    if data["processing"]["identity"] not in ("faces", "walk", "off"):
+        problems.append("processing.identity must be faces, walk or off")
     if data["record"]["codec"] not in ("h264", "mjpeg"):
         problems.append("record.codec must be h264 or mjpeg")
     if data["camera"]["rotate"] not in (0, 90, 180, 270):

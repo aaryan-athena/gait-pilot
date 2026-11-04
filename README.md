@@ -19,7 +19,7 @@ are meaningful for a given recording.
 streamlit run app/main.py
 ```
 
-A four-page web UI for pilot testing: upload a video, get results, save the
+A five-page web UI for pilot testing: upload a video, get results, save the
 session to a person's history, and view trends.
 
 It is built to **show its working**, because the failure mode that matters in a
@@ -51,8 +51,34 @@ expander down.
   absolute threshold — only on a change across sessions, where a consistent bias
   cancels.
 
-Pages: **Analyse a walk**, **Trends**, **Calibration** (only needed for gait
-speed in m/s — everything else is scale-free), and **Limitations**.
+Pages: **Analyse a walk**, **Trends**, **People**, **Calibration** (only needed
+for gait speed in m/s — everything else is scale-free), and **Limitations**.
+
+### Recognising who walked
+
+Leave the name blank when analysing and the tool **suggests** who it was; a
+person confirms or corrects it before the walk joins anyone's trend, and the
+flags are then worked out against that person's own history. It never assigns
+a walk by itself: a misfiled walk corrupts two trends at once.
+
+- **Face.** Photos enrolled on the People page, plus faces seen in walks
+  already confirmed. OpenCV's YuNet detector and SFace recogniser (MIT /
+  Apache-2.0; the better-known InsightFace weights are non-commercial).
+  Two side-on sample clips of the same person matched at similarity ~0.9
+  against a same-person threshold of 0.36.
+- **Build and walk.** Body proportions (torso to leg, thigh to shin, upper arm
+  to forearm, head to torso), with cadence and speed as weak tie-breakers —
+  deliberately weak, since they are what the tool monitors and a person whose
+  walking declines must still be recognised. Learned from every confirmed walk;
+  a person needs two in the same camera angle. Never reported as a strong
+  match on its own.
+- **Not yet measured:** how well either separates *different* people. Every
+  test clip so far shows one person. Measure it on the pilot roster before
+  relying on the suggestions; similar-sized people will be confused by build.
+- **Consent and privacy.** A face embedding is biometric data. Faces are only
+  enrolled, or kept from walks, for people with consent recorded (who gave it
+  and when). Only the 128-number embedding is stored, never the photo, and
+  "Delete face data" removes it without touching the person's walks.
 
 ### Deploying to Streamlit Community Cloud
 
@@ -272,8 +298,9 @@ analysis library, and everything else is configuration, docs or data.
 app/                       the Streamlit pilot platform, self-contained
   main.py                    entry point — streamlit run app/main.py
   shared.py                  config, database access, widgets used by several views
-  views/                     one module per page: analyse, trends, calibration,
-                             limitations
+  identify.py                suggesting who walked, shared by analyse and people
+  views/                     one module per page: analyse, trends, people,
+                             calibration, limitations
 
 src/gaitscreen/            the analysis library — no UI code
   config.py  types.py        config tree; dataclasses + coordinate conventions
@@ -286,6 +313,7 @@ src/gaitscreen/            the analysis library — no UI code
   flagging/                  absolute thresholds, personal baselines, trend rules
   quality/                   quality score, speed feasibility, assistive-device proxy
   calibration/               scale/homography model, point picking, drift check
+  identity/                  walk signatures, face embeddings, candidate ranking
   storage/                   SQLite schema, repository, per-session artifacts
   reporting/charts.py        figures, shared by the app and the CLI
   pipeline.py  cli.py        stage composition and the command line

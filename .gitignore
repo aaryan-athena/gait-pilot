@@ -37,6 +37,7 @@ sample_video/*.mp4
 # here, which works identically on a laptop and on Streamlit Cloud. See
 # `pose.auto_download` in config/default.yaml.
 models/*.task
+models/*.onnx
 
 # --- Secrets -----------------------------------------------------------------
 # Never commit. On Streamlit Cloud these are set in the app's Secrets panel.

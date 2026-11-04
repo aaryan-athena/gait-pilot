@@ -41,6 +41,10 @@ def make_session_id(user_id: str, session_date: str, video_source: str) -> str:
     return hashlib.sha1(key.encode("utf-8")).hexdigest()[:16]
 
 
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
 @dataclass
 class SessionRecord:
     """Everything written to the ``sessions`` table for one session."""
@@ -197,6 +201,99 @@ class SessionRepository:
             "SELECT user_id FROM users ORDER BY user_id", ()
         ).fetchall()
         return [r[0] for r in rows]
+
+    # -- identification --------------------------------------------------
+    def people(self) -> pd.DataFrame:
+        """Everyone, with what is known for recognising them."""
+        return self._frame(
+            "SELECT u.user_id, u.face_consent_at, u.face_consent_by, "
+            "(SELECT COUNT(*) FROM face_enrolments f WHERE f.user_id=u.user_id) AS n_faces, "
+            "(SELECT COUNT(*) FROM walk_signatures w WHERE w.user_id=u.user_id "
+            " AND w.confirmed=1) AS n_walks "
+            "FROM users u ORDER BY u.user_id"
+        )
+
+    def record_face_consent(self, user_id: str, given_by: str) -> None:
+        self.ensure_user(user_id)
+        self.conn.execute(
+            "UPDATE users SET face_consent_at=?, face_consent_by=? WHERE user_id=?",
+            (_now(), given_by, user_id),
+        )
+        self.conn.commit()
+
+    def has_face_consent(self, user_id: str) -> bool:
+        row = self._one("SELECT face_consent_at FROM users WHERE user_id=?", (user_id,))
+        return bool(row and row["face_consent_at"])
+
+    def add_face_enrolment(self, user_id: str, embedding: Sequence[float],
+                           source: Optional[str] = None) -> None:
+        if not self.has_face_consent(user_id):
+            raise PermissionError(f"no face-recognition consent recorded for {user_id}")
+        self.conn.execute(
+            "INSERT INTO face_enrolments(user_id, created_at, embedding_json, source) "
+            "VALUES(?, ?, ?, ?)",
+            (user_id, _now(), json.dumps(list(embedding)), source),
+        )
+        self.conn.commit()
+
+    def save_signature(self, session_id: str, user_id: str, signature: dict,
+                       faces: Sequence[dict] = (), *, confirmed: bool = True) -> None:
+        """Store what a saved walk looked like. Faces are kept only with consent."""
+        if faces and not self.has_face_consent(user_id):
+            faces = ()
+        self.conn.execute(
+            "INSERT INTO walk_signatures(session_id, user_id, view_kind, signature_json, "
+            "faces_json, confirmed, created_at) VALUES(?,?,?,?,?,?,?) "
+            "ON CONFLICT(session_id) DO UPDATE SET user_id=excluded.user_id, "
+            "view_kind=excluded.view_kind, signature_json=excluded.signature_json, "
+            "faces_json=excluded.faces_json, confirmed=excluded.confirmed",
+            (session_id, user_id, signature.get("view"), json.dumps(signature),
+             json.dumps([{"embedding": f["embedding"]} for f in faces]) if faces else None,
+             int(confirmed), _now()),
+        )
+        self.conn.commit()
+
+    def gallery(self) -> list:
+        """Everyone's faces and confirmed walks, for :func:`identity.rank`."""
+        from ..identity.matcher import PersonGallery, unit
+
+        people: dict[str, PersonGallery] = {}
+
+        def person(user_id: str) -> PersonGallery:
+            return people.setdefault(user_id, PersonGallery(user_id))
+
+        for user_id, embedding in self.conn.execute(
+                "SELECT f.user_id, f.embedding_json FROM face_enrolments f "
+                "JOIN users u ON u.user_id=f.user_id WHERE u.face_consent_at IS NOT NULL",
+                ()).fetchall():
+            person(user_id).faces.append(unit(json.loads(embedding)))
+        for user_id, signature, faces, consent in self.conn.execute(
+                "SELECT w.user_id, w.signature_json, w.faces_json, u.face_consent_at "
+                "FROM walk_signatures w JOIN users u ON u.user_id=w.user_id "
+                "WHERE w.confirmed=1", ()).fetchall():
+            entry = person(user_id)
+            entry.walks.append(json.loads(signature))
+            if faces and consent:
+                entry.faces.extend(unit(f["embedding"]) for f in json.loads(faces))
+        return list(people.values())
+
+    def sessions_without_signature(self) -> pd.DataFrame:
+        return self._frame(
+            "SELECT s.session_id, s.user_id, s.artifacts_dir, s.view_kind, s.cadence_spm, "
+            "s.gait_speed_mps FROM sessions s "
+            "LEFT JOIN walk_signatures w ON w.session_id=s.session_id "
+            "WHERE w.session_id IS NULL ORDER BY s.session_date"
+        )
+
+    def delete_biometrics(self, user_id: str) -> None:
+        """Remove a person's face data and consent; their walks and trends stay."""
+        self.conn.execute("DELETE FROM face_enrolments WHERE user_id=?", (user_id,))
+        self.conn.execute("UPDATE walk_signatures SET faces_json=NULL WHERE user_id=?",
+                          (user_id,))
+        self.conn.execute(
+            "UPDATE users SET face_consent_at=NULL, face_consent_by=NULL WHERE user_id=?",
+            (user_id,))
+        self.conn.commit()
 
     # -- calibration -----------------------------------------------------
     def save_calibration(self, calibration: Calibration, *, make_active: bool = True) -> str:

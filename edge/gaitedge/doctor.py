@@ -28,6 +28,8 @@ def run_checks(settings: Settings) -> bool:
     check("ffmpeg (annotated video)", _ffmpeg)
     check("storage", lambda: _storage(settings))
     check("pose model", lambda: _model(settings))
+    if settings["processing.identity"] == "faces":
+        check("face models", lambda: _face_models(settings))
     check("camera frame rate", lambda: _camera(settings))
     if settings["upload.server_url"]:
         check("server", lambda: _server(settings))
@@ -84,6 +86,13 @@ def _model(settings: Settings) -> str:
 
     path = _resolve_model(settings.analysis_config(), settings.root)
     return f"{settings['processing.model']} ({path.stat().st_size / 1e6:.0f} MB)"
+
+
+def _face_models(settings: Settings) -> str:
+    from gaitscreen.identity import load_models
+
+    load_models(settings.analysis_config(), settings.root)   # downloads on first use
+    return "face detector and recogniser loaded"
 
 
 def _camera(settings: Settings) -> str:

@@ -7,10 +7,11 @@ server can store it without needing Python objects from this device.
 Two things the device cannot know shape what it reports:
 
 * **Who walked past.** A camera on a corridor wall sees whoever comes by. The
-  device reports the walk; deciding which resident it was, and so which
-  personal history it belongs to, happens on the server. Only the absolute
+  device describes the walker (``identity``: body proportions and, if enabled,
+  face embeddings) but holds no list of people to compare against; the
+  platform suggests who it was and a person confirms. Only the absolute
   checks (e.g. walking speed under the illustrative threshold) can run here;
-  the personal-trend checks run on the server once the walk has a person.
+  the personal-trend checks run on the platform once the walk has a person.
 * **Whether it was a walk at all.** The motion trigger records doors opening
   and people pausing in shot. A clip in which no gait could be measured is
   marked ``no_walk`` and, by default, deleted rather than sent: footage of
@@ -58,6 +59,8 @@ def analyse_file(settings: Settings, video: Path, out_dir: Path, *,
     analysis_s = time.time() - started
 
     payload = result_to_dict(result, cfg)
+    if payload["summary"]["is_walk"] and settings["processing.identity"] != "off":
+        payload["identity"] = _identity(settings, result, cfg, video)
     payload["device"] = settings.describe()
     payload["processing"] = {
         "where": "device",
@@ -70,6 +73,23 @@ def analyse_file(settings: Settings, video: Path, out_dir: Path, *,
 
     (out_dir / "result.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return payload
+
+
+def _identity(settings: Settings, result, cfg, video: Path) -> dict:
+    """What the walker looked like, for the platform to match. Never fatal."""
+    from gaitscreen.identity import face_embeddings, load_models, signature_from_result
+
+    started = time.time()
+    out: dict = {"signature": None, "faces": []}
+    try:
+        out["signature"] = signature_from_result(result, cfg)
+        if settings["processing.identity"] == "faces":
+            models = load_models(cfg, settings.root)
+            out["faces"] = face_embeddings(video, result.extraction.raw, models, cfg)
+    except Exception as exc:  # noqa: BLE001 - the measurements matter more
+        out["error"] = f"{type(exc).__name__}: {exc}"
+    out["seconds"] = round(time.time() - started, 1)
+    return out
 
 
 def _overlay(result, cfg, path: Path) -> Optional[dict]:
@@ -99,7 +119,7 @@ def result_to_dict(result, cfg) -> dict:
     measured = [c for c in plain.cards if c.measured]
 
     return _clean({
-        "schema": "gaitedge.result/1",
+        "schema": "gaitedge.result/2",
         "algo_version": ALGO_VERSION,
         "recorded": {
             "file": Path(str(info.path)).name,

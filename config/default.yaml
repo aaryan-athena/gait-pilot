@@ -286,6 +286,33 @@ flagging:
     confirm_window: 3
     confirm_min_hits: 2
 
+identity:
+  # Suggests who walked, for staff to confirm; never assigns a walk by itself.
+  # See gaitscreen/identity. Thresholds below are starting points: how well
+  # walk signatures separate people has not been measured on a real roster.
+  enabled: true
+  max_candidates: 3
+  face:
+    # OpenCV's YuNet detector and SFace recogniser (MIT / Apache-2.0),
+    # downloaded on first use like the pose model.
+    detector_path: models/face_detection_yunet_2023mar.onnx
+    recogniser_path: models/face_recognition_sface_2021dec.onnx
+    min_score: 0.8              # detector confidence for a face to count
+    min_face_px: 24             # smaller faces in a walk are ignored
+    min_photo_face_px: 60       # enrolment photos must show the face larger
+    min_landmark_visibility: 0.8
+    sample_frames: 24           # frames of a walk searched for a face
+    keep: 8                     # best faces kept per walk
+    possible: 0.363             # cosine similarity: OpenCV's same-person threshold
+    strong: 0.50
+    margin: 0.08                # strong only if this far ahead of the next person
+  walk:
+    min_frames: 30              # clear frames a body trait needs
+    min_visibility: 0.6
+    min_confirmed: 2            # confirmed walks before a person is matched by walk
+    max_distance: 2.0           # in within-person spreads; beyond is not suggested
+    gait_weight: 0.25           # cadence/speed count this much against body traits
+
 storage:
   db_path: data/gaitscreen.db
   artifacts_root: data/sessions

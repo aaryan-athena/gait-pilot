@@ -307,3 +307,11 @@ def test_live_view_serves_page_status_and_frames():
         stream.close()
     finally:
         preview.close()
+
+
+def test_identity_setting_accepts_a_bare_yaml_off(settings_factory):
+    # `identity: off` in YAML arrives as False; it must still mean off.
+    assert settings_factory(processing__identity=False)["processing.identity"] == "off"
+    assert settings_factory()["processing.identity"] == "faces"
+    with pytest.raises(ValueError, match="processing.identity"):
+        settings_factory(processing__identity="everything")

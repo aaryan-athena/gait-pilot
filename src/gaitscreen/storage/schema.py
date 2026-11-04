@@ -24,7 +24,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -154,6 +154,33 @@ CREATE TABLE IF NOT EXISTS session_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_session ON session_events(session_id);
+
+-- Identification (gaitscreen.identity). Face embeddings are biometric data:
+-- only the 128-number embedding is kept, never the photo, and deleting a
+-- person's face data leaves their walks untouched.
+CREATE TABLE IF NOT EXISTS face_enrolments (
+    enrol_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id        TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    created_at     TEXT NOT NULL,
+    embedding_json TEXT NOT NULL,
+    source         TEXT                      -- e.g. the photo's file name
+);
+
+CREATE INDEX IF NOT EXISTS idx_faces_user ON face_enrolments(user_id);
+
+-- One per saved walk: what the walk looked like, for recognising the person
+-- next time. Only walks a person confirmed are used for matching.
+CREATE TABLE IF NOT EXISTS walk_signatures (
+    session_id     TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
+    user_id        TEXT NOT NULL,
+    view_kind      TEXT,
+    signature_json TEXT NOT NULL,
+    faces_json     TEXT,
+    confirmed      INTEGER NOT NULL DEFAULT 1,
+    created_at     TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_signatures_user ON walk_signatures(user_id);
 """
 
 
@@ -255,6 +282,12 @@ _ADDED_COLUMNS = {
         "view_kind": "TEXT",
         "step_width_norm": "REAL",
         "trunk_lateral_sway_norm": "REAL",
+    },
+    "users": {
+        # Who agreed to face recognition for this person, and when. Faces
+        # are only enrolled for people with this recorded.
+        "face_consent_at": "TEXT",
+        "face_consent_by": "TEXT",
     },
 }
 

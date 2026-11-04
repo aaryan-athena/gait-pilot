@@ -67,7 +67,8 @@ def _resolve_model(cfg: Config, project_root: str | Path) -> Path:
     return _download_model(url, model_path)
 
 
-def _download_model(url: str, destination: Path) -> Path:
+def _download_model(url: str, destination: Path, *, label: str = "pose model (~30 MB)",
+                    min_bytes: int = _MIN_MODEL_BYTES) -> Path:
     """Fetch the model to a temporary file, then move it into place.
 
     Downloading straight to the destination would leave a truncated file that
@@ -79,7 +80,7 @@ def _download_model(url: str, destination: Path) -> Path:
     import urllib.request
 
     destination.parent.mkdir(parents=True, exist_ok=True)
-    print(f"[gaitscreen] downloading pose model (~30 MB) to {destination} …")
+    print(f"[gaitscreen] downloading {label} to {destination} …")
 
     handle, temporary = tempfile.mkstemp(
         dir=destination.parent, suffix=".task.partial"
@@ -92,7 +93,7 @@ def _download_model(url: str, destination: Path) -> Path:
                 open(temporary_path, "wb") as out:
             shutil.copyfileobj(response, out)
 
-        if temporary_path.stat().st_size < _MIN_MODEL_BYTES:
+        if temporary_path.stat().st_size < min_bytes:
             raise OSError(
                 f"downloaded file is only {temporary_path.stat().st_size} bytes; "
                 "the model URL may have moved"
@@ -103,11 +104,11 @@ def _download_model(url: str, destination: Path) -> Path:
     except Exception as exc:
         temporary_path.unlink(missing_ok=True)
         raise RuntimeError(
-            f"could not download the pose model from {url}: {exc}\n"
+            f"could not download the {label} from {url}: {exc}\n"
             f"Fetch it manually with:\n  curl -sSL -o {destination} {url}"
         ) from exc
 
-    print(f"[gaitscreen] pose model ready ({destination.stat().st_size / 1e6:.0f} MB)")
+    print(f"[gaitscreen] {label} ready ({destination.stat().st_size / 1e6:.1f} MB)")
     return destination
 
 

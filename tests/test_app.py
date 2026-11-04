@@ -14,7 +14,7 @@ pytest.importorskip("streamlit")
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
 APP = Path(__file__).resolve().parents[1] / "app" / "main.py"
-PAGES = ["Trends", "Analyse a walk", "Camera setup", "Limitations"]
+PAGES = ["Trends", "Analyse a walk", "People", "Camera setup", "Limitations"]
 
 
 def _boot() -> AppTest:
@@ -44,7 +44,7 @@ def test_every_page_renders_without_error(page):
 
 def test_pages_carry_the_screening_not_diagnostic_disclaimer():
     """The distinction is the whole framing of the tool; it must not go missing."""
-    for page in ("Trends", "Analyse a walk", "Camera setup", "Limitations"):
+    for page in ("Trends", "Analyse a walk", "People", "Camera setup", "Limitations"):
         app = _boot()
         app.sidebar.radio[0].set_value(page).run()
         markdown = " ".join(m.value for m in app.markdown)
